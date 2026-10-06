@@ -151,7 +151,8 @@ if [ "$RELEASE" -eq 1 ]; then
         rm -f "$ZIP"
         ditto -c -k --sequesterRsrc --keepParent "$APP_NAME" "$ZIP"
     fi
-    shasum -a 256 "$ZIP" > "$ZIP.sha256"
+    # Bare filename so `shasum -c` works from the download folder.
+    (cd dist && shasum -a 256 "MusicStudio-${VERSION}.zip" > "MusicStudio-${VERSION}.zip.sha256")
     echo -e "${GREEN}==> Release package: ${ZIP}${NC}"
     cat "$ZIP.sha256"
 fi
