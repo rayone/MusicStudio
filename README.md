@@ -30,7 +30,7 @@ MusicStudio turns a style description plus lyrics into a finished, mastered, tag
 
 Around the models it gives you:
 
-- **A style library of ~5,700 presets** with two search modes: AI Search (semantic, on-device embeddings), which is the default, and exact keyword Text Match. Filter by key, scale, vocal, meter, register and language.
+- **A style library of >1000 presets** with two search modes: AI Search (semantic, on-device embeddings), which is the default, and exact keyword Text Match. Filter by key, scale, vocal, meter, register and language.
 - **A lyrics editor** with one-click structure tags (`[Verse]`, `[Chorus]`, …) and a live token budget.
 - **An ABC score editor** for YuE2's symbolic planning ("CoT mode"). It only appears when the selected mode actually uses a score.
 - **A persistent render queue** with batches, seed locking, pause/resume and ETAs calibrated from your own past renders.
@@ -38,6 +38,11 @@ Around the models it gives you:
 - **A Studio tab** for reviewing tracks: spectrogram, measured tempo, key, loudness and spectral analysis, live Audio Unit effects and offline VST3 effects. A mastering chain (EQ, air lift, artifact reduction) is available from the [command line](docs/CLI.md#master).
 - **SongBench quality scoring** across 7 musical dimensions (academic use only; see [Licensing](#licensing)).
 - **Songwriter integration:** import ready-made songs from a [Songwriter](docs/songwriter-api-contract.md) server and report results back. Imported songs are saved as `[Title]_[Timestamp].mp3`.
+
+<img width="1510" height="949" alt="image" src="https://github.com/user-attachments/assets/0d479686-eba4-46d2-859d-fbbd88dc5ac9" />
+<img width="1510" height="947" alt="image" src="https://github.com/user-attachments/assets/b15f35a6-f557-4186-8075-a8d7d0f9cd60" />
+<img width="742" height="564" alt="image" src="https://github.com/user-attachments/assets/70bed8d5-4444-4b4c-9b50-385927ef8bc9" />
+
 
 ## Requirements
 
