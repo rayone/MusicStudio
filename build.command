@@ -141,20 +141,31 @@ echo -e "${GREEN}==> Build complete: ${APP_NAME} (v${VERSION})${NC}"
 
 if [ "$RELEASE" -eq 1 ]; then
     mkdir -p dist
-    ZIP="dist/MusicStudio-${VERSION}.zip"
-    rm -f "$ZIP"
-    ditto -c -k --sequesterRsrc --keepParent "$APP_NAME" "$ZIP"
-    if [ -n "${NOTARY_PROFILE:-}" ]; then
-        echo -e "${BLUE}==> Notarizing ${ZIP}...${NC}"
-        xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-        xcrun stapler staple "$APP_NAME"
-        rm -f "$ZIP"
-        ditto -c -k --sequesterRsrc --keepParent "$APP_NAME" "$ZIP"
+    DMG="dist/MusicStudio-${VERSION}.dmg"
+    rm -f "$DMG" "$DMG.sha256"
+
+    echo -e "${BLUE}==> Creating DMG image: ${DMG}...${NC}"
+    STAGE_DIR="$(mktemp -d -t musicstudio-dmg-stage)"
+    cp -R "$APP_NAME" "$STAGE_DIR/"
+    ln -s /Applications "$STAGE_DIR/Applications"
+
+    hdiutil create -volname "MusicStudio" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG"
+    rm -rf "$STAGE_DIR"
+
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+        codesign --force --sign "$CODESIGN_IDENTITY" "$DMG"
     fi
+
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+        echo -e "${BLUE}==> Notarizing ${DMG}...${NC}"
+        xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+        xcrun stapler staple "$DMG"
+    fi
+
     # Bare filename so `shasum -c` works from the download folder.
-    (cd dist && shasum -a 256 "MusicStudio-${VERSION}.zip" > "MusicStudio-${VERSION}.zip.sha256")
-    echo -e "${GREEN}==> Release package: ${ZIP}${NC}"
-    cat "$ZIP.sha256"
+    (cd dist && shasum -a 256 "MusicStudio-${VERSION}.dmg" > "MusicStudio-${VERSION}.dmg.sha256")
+    echo -e "${GREEN}==> Release package: ${DMG}${NC}"
+    cat "dist/MusicStudio-${VERSION}.dmg.sha256"
 fi
 
 echo -e "${BLUE}    Run it: open ${APP_NAME}   (or double-click run.command)${NC}"

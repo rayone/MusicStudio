@@ -60,11 +60,11 @@ Intel Macs are not supported, because MLX requires Apple Silicon.
 
 ### Option A: download the release
 
-1. Download `MusicStudio-0.1.0.zip` from the [latest release](https://github.com/rayone/MusicStudio/releases/latest) and check it against the published `.sha256`:
+1. Download `MusicStudio-0.1.0.dmg` from the [latest release](https://github.com/rayone/MusicStudio/releases/latest) and check it against the published `.sha256`:
    ```bash
-   shasum -a 256 -c MusicStudio-0.1.0.zip.sha256
+   shasum -a 256 -c MusicStudio-0.1.0.dmg.sha256
    ```
-2. Unzip and drag **MusicStudio.app** to `/Applications`.
+2. Open the DMG and drag **MusicStudio.app** into the **Applications** folder.
 3. v0.1.0 is ad-hoc signed, not notarized. Before the first launch, either right-click the app → **Open** → **Open**, or clear the download quarantine flag:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MusicStudio.app

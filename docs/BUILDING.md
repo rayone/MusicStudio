@@ -18,7 +18,7 @@ MusicStudio has no Xcode project. `build.command` compiles every Swift file in `
 ```bash
 ./build.command              # build MusicStudio.app (ad-hoc signed)
 ./run.command                # rebuild only if anything changed, then open the app
-./build.command --release    # build + dist/MusicStudio-<version>.zip + .sha256
+./build.command --release    # build + dist/MusicStudio-<version>.dmg + .sha256
 ```
 
 `run.command` compares the modification time of every file in `Sources/`, `Resources/` and `build.command` against the built binary, and rebuilds only when something is newer.
@@ -31,13 +31,13 @@ MusicStudio has no Xcode project. `build.command` compiles every Swift file in `
 4. Writes `Info.plist` with the version, bundle id `ai.opencode.mlx.musicstudio`, icon, minimum macOS 14 and the local-network usage string.
 5. Copies `bin/uv` into `Contents/Resources/bin/uv`.
 6. Signs the bundle (see below) and runs `codesign --verify --deep --strict`.
-7. With `--release`, zips the app with `ditto` (preserves extended attributes and the signature), optionally notarizes it, and writes a SHA-256 checksum.
+7. With `--release`, stages the app and an `/Applications` symlink into a compressed UDZO `.dmg` via `hdiutil`, signs/notarizes it if configured, and writes a SHA-256 checksum.
 
 ### Build-time variables
 
 | Variable | Default | Effect |
 |---|---|---|
-| `VERSION` | `0.1.0` | `CFBundleShortVersionString`, `CFBundleVersion`, and the zip name |
+| `VERSION` | `0.1.0` | `CFBundleShortVersionString`, `CFBundleVersion`, and the DMG name |
 | `CODESIGN_IDENTITY` | *(unset → ad-hoc)* | Sign with this identity under the hardened runtime |
 | `NOTARY_PROFILE` | *(unset)* | `notarytool` keychain profile. Notarizes and staples the release. Requires `CODESIGN_IDENTITY`. |
 
@@ -79,7 +79,7 @@ git tag -a v0.1.1 -m "MusicStudio 0.1.1"
 git push origin v0.1.1
 
 # 4. Create the release with the zip and checksum attached
-gh release create v0.1.1 dist/MusicStudio-0.1.1.zip dist/MusicStudio-0.1.1.zip.sha256 \
+gh release create v0.1.1 dist/MusicStudio-0.1.1.dmg dist/MusicStudio-0.1.1.dmg.sha256 \
   --title "MusicStudio 0.1.1" --notes-file <(sed -n '/## \[0.1.1\]/,/## \[/p' CHANGELOG.md | sed '$d')
 ```
 
@@ -88,7 +88,7 @@ Release checklist:
 - [ ] `CHANGELOG.md` has a section for the version, and the compare/tag link at the bottom.
 - [ ] `./build.command --release` finishes with no errors and `codesign --verify` passes.
 - [ ] On a clean user account (or after moving `~/.MusicStudio` aside), the app completes first-run setup, downloads a model and renders a song.
-- [ ] Unzipped from `dist/`, the app launches.
+- [ ] Mounted from `dist/`, the app opens and runs.
 - [ ] `seed_studio.db` contains no personal data: `sqlite3 Resources/seed_studio.db "select count(*) from generations; select count(*) from jobs;"` both return `0`.
 
 ## Changing what gets installed on first launch

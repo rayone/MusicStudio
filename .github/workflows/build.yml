@@ -38,5 +38,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MusicStudio-app
-          path: dist/*.zip
+          path: dist/*.dmg
           retention-days: 14
