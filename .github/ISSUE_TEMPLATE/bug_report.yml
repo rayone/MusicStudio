@@ -1,0 +1,36 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MusicStudio version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac, RAM and macOS version
+      placeholder: "MacBook Pro M3 Max, 64 GB, macOS 15.5"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and settings
+      placeholder: "YuE2-3B 8bit, 120 s, 32 steps, CoT Full"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: Press ⌘K, set the level to Debug, reproduce the problem, and paste the relevant lines. Remove any tokens.
+      render: text

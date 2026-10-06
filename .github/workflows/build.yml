@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile and assemble app
+    runs-on: macos-15  # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          swiftc --version
+
+      - name: Build MusicStudio.app
+        run: ./build.command --release
+
+      - name: Verify bundle
+        run: |
+          codesign --verify --deep --strict MusicStudio.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' MusicStudio.app/Contents/Info.plist
+          test -x MusicStudio.app/Contents/Resources/bin/uv
+          test -f MusicStudio.app/Contents/Resources/studio.py
+          test -f MusicStudio.app/Contents/Resources/engine-requirements.txt
+          test ! -e MusicStudio.app/Contents/Resources/backups
+
+      - name: Python engine syntax check
+        run: python3 -m py_compile Resources/studio.py Resources/songbench/*.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicStudio-app
+          path: dist/*.zip
+          retention-days: 14

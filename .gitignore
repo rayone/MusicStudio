@@ -1,0 +1,18 @@
+.DS_Store
+MusicStudio.app/
+*.pyc
+__pycache__/
+*.db-wal
+*.db-shm
+build/
+dist/
+.venv/
+~/
+
+# Local database backups (personal generation history)
+Resources/backups/
+
+# Third-party installers and copyrighted reference books kept locally only
+*.dmg
+*.pdf.md
+*.epub.md

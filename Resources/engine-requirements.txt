@@ -1,0 +1,7 @@
+# YuE2 generation engine (vanch007/mlx-Yue, Apache-2.0), provides the `lyra` package.
+# Installed by SetupManager.runBootstrap() with `uv pip install --no-deps` AFTER
+# requirements.txt: upstream pins older transformers/numpy/safetensors than the rest
+# of the engine, so its runtime deps (mlx, mlx-lm, transformers, safetensors, tiktoken,
+# numpy, soundfile, psutil) are pinned in requirements.txt instead.
+# Pinned to an exact commit for reproducible installs.
+mlx-yue @ https://github.com/vanch007/mlx-Yue/archive/9253ed133343406947bde7b67d43c7a63fb39d99.tar.gz

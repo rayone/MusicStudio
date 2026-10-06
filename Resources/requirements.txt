@@ -1,0 +1,57 @@
+# MusicStudio Python engine dependencies (Python 3.12, Apple Silicon / MLX).
+# Installed by SetupManager.runBootstrap() via `uv pip install -r requirements.txt`
+# on first run. Pins resolved against PyPI on 2026-09-22.
+mlx==0.32.2
+mlx-audio==0.5.4
+mlx-lm==0.31.3
+tiktoken==0.14.0
+numpy==2.5.2
+lameenc==1.8.4
+huggingface-hub==1.32.0
+transformers==5.17.0
+scipy==1.18.1
+sounddevice==0.5.6
+miniaudio==1.71
+tqdm==4.70.1
+safetensors==0.8.0
+
+# YuE2 engine (mlx-yue, see engine-requirements.txt) runtime dependency.
+psutil==7.2.2
+
+# Audio metadata tagging + full-track analysis (added 2026-10-04).
+# librosa 1.0.0 extracts measured tempo/key/scale/spectral features from the
+# rendered audio; mutagen writes ID3v2.4 / MP4 / Vorbis / RIFF tag frames.
+# Transitive deps pinned via `uv pip compile` against the existing numpy/scipy pins.
+mutagen==1.48.1
+librosa==1.0.0
+soundfile==0.14.0
+numba==0.68.0
+llvmlite==0.50.0
+scikit-learn==1.9.1
+soxr==1.1.0
+pooch==1.9.0
+joblib==1.6.0
+threadpoolctl==3.7.0
+lazy-loader==0.6
+msgpack==1.2.3
+decorator==5.3.1
+cloudpickle==3.1.2
+narwhals==2.26.0
+platformdirs==4.12.3
+
+# Spectrogram rendering for the Studio tab (added 2026-10-04).
+# librosa mel-spectrogram -> matplotlib Agg -> cached PNG, headless.
+matplotlib==3.11.2
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.66.1
+kiwisolver==1.5.1
+pillow==12.3.0
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+six==1.17.0
+
+# Studio-grade mastering DSP (added 2026-10-04).
+# Spotify's pedalboard: JUCE/C++ effects (EQ, compressor, limiter, reverb),
+# native Apple-Silicon wheel, only runtime dep is numpy (already pinned).
+pedalboard==0.9.25
