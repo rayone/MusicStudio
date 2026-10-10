@@ -37,7 +37,7 @@ Around the models it gives you:
 - **Automatic post-processing:** loudness normalisation to −14 LUFS / −1 dBTP, conversion to WAV, MP3, M4A or FLAC, and rich metadata tags. The untouched render is kept as `_raw.wav`.
 - **A Studio tab** for reviewing tracks: spectrogram, measured tempo, key, loudness and spectral analysis, live Audio Unit effects and offline VST3 effects. A mastering chain (EQ, air lift, artifact reduction) is available from the [command line](docs/CLI.md#master).
 - **SongBench quality scoring** across 7 musical dimensions (academic use only; see [Licensing](#licensing)).
-- **Songwriter integration:** import ready-made songs from a [Songwriter](docs/songwriter-api-contract.md) server and report results back. Imported songs are saved as `[Title]_[Timestamp].mp3`.
+- [**Songwriter integration:**](https://github.com/rayone/songwriter) import ready-made songs from a [Songwriter](docs/songwriter-api-contract.md) server and report results back. Imported songs are saved as `[Title]_[Timestamp].mp3`.
 
 <img width="1510" height="949" alt="image" src="https://github.com/user-attachments/assets/0d479686-eba4-46d2-859d-fbbd88dc5ac9" />
 <img width="1510" height="947" alt="image" src="https://github.com/user-attachments/assets/b15f35a6-f557-4186-8075-a8d7d0f9cd60" />
