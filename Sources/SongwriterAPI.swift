@@ -92,15 +92,19 @@ public final class SongwriterAPI {
         return response.songs.count
     }
 
-    public func songs() async throws -> [SongwriterSongSummary] {
+    public func songs(allRevisions: Bool = false) async throws -> [SongwriterSongSummary] {
         guard Self.isEnabled else { throw SongwriterAPIError.disabled }
         let root = try Self.validatedBaseURL(Self.configuredBaseURL)
+        var query = [
+            URLQueryItem(name: "status", value: "ready"),
+            URLQueryItem(name: "limit", value: "100")
+        ]
+        if allRevisions {
+            query.append(URLQueryItem(name: "all_revisions", value: "true"))
+        }
         var summaries = try await get(
             "v1/songs",
-            queryItems: [
-                URLQueryItem(name: "status", value: "ready"),
-                URLQueryItem(name: "limit", value: "50")
-            ],
+            queryItems: query,
             baseURL: root,
             token: Self.configuredToken,
             as: SongwriterSongList.self
@@ -132,11 +136,16 @@ public final class SongwriterAPI {
         return summaries
     }
 
-    public func song(id: String) async throws -> SongwriterSongDetail {
+    public func song(id: String, revision: Int? = nil) async throws -> SongwriterSongDetail {
         guard Self.isEnabled else { throw SongwriterAPIError.disabled }
         let root = try Self.validatedBaseURL(Self.configuredBaseURL)
+        var queryItems: [URLQueryItem] = []
+        if let revision = revision {
+            queryItems.append(URLQueryItem(name: "revision", value: String(revision)))
+        }
         return try await get(
             "v1/songs/\(id)",
+            queryItems: queryItems,
             baseURL: root,
             token: Self.configuredToken,
             as: SongwriterSongDetail.self

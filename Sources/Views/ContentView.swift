@@ -229,11 +229,16 @@ public struct ContentView: View {
             .layoutPriority(1)
 
             if vm.isSongwriterEnabled && vm.showSongwriterInHeader {
-                Button(action: { vm.showSongwriterPopover.toggle() }) {
+                Button(action: {
+                    vm.showSongwriterPopover.toggle()
+                    if vm.showSongwriterPopover {
+                        vm.loadSongwriterSongs(allRevisions: true)
+                    }
+                }) {
                     HStack(spacing: 4) {
                         Image(systemName: "square.and.arrow.down")
                             .font(.system(size: 10))
-                        Text(vm.selectedSongwriterTitle ?? "Songwriter")
+                        Text("Songwriter")
                             .font(Theme.smallMedium)
                             .lineLimit(1)
                     }
@@ -246,7 +251,7 @@ public struct ContentView: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: 130)
                 .help("Import a ready song from Songwriter")
-                .popover(isPresented: $vm.showSongwriterPopover, arrowEdge: .bottom) {
+                .sheet(isPresented: $vm.showSongwriterPopover) {
                     SongwriterPopoverView(vm: vm)
                 }
             }

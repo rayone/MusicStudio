@@ -60,6 +60,8 @@ public enum LogComponent: String, CaseIterable, Codable, Sendable {
     case loudness, convert, tags, stems, sfx, eq, eval
     // Data
     case db, search, embed, template, lyrics, abc, fs
+    // Network audio output / casting
+    case netaudio
 
     public var displayName: String {
         rawValue.uppercased()
@@ -273,8 +275,22 @@ public struct SongwriterSongSummary: Codable, Identifiable, Hashable {
     public let has_abc: Bool?
     public var created_at: String?
     public let updated_at: String
-}
+    public var available_revisions: [Int]?
+    public var take_id: String?
 
+    public var allRevisions: [Int] {
+        if let revs = available_revisions, !revs.isEmpty {
+            return revs
+        }
+        return Array((1...max(1, revision)).reversed())
+    }
+
+    /// Stable identity for one take. Prefers the server's `take_id` (contract v4), falling
+    /// back to `id:revision` for older responses.
+    public var uniqueId: String {
+        take_id ?? "\(id):\(revision)"
+    }
+}
 public struct SongwriterSongList: Codable {
     public let songs: [SongwriterSongSummary]
     public let next_cursor: String?
@@ -319,26 +335,6 @@ public struct SongwriterSongDetail: Codable, Hashable {
     public let model_inputs: SongwriterModelInputs?
     public let created_at: String?
     public let updated_at: String
-}
-
-public struct ModelRow: Identifiable, Hashable {
-    public var id: String
-    public var name: String
-    public var family: String
-    public var backend: String
-    public var weightsPath: String
-    public var available: Bool
-    public var reason: String
-
-    public init(id: String, name: String, family: String, backend: String, weightsPath: String, available: Bool, reason: String) {
-        self.id = id
-        self.name = name
-        self.family = family
-        self.backend = backend
-        self.weightsPath = weightsPath
-        self.available = available
-        self.reason = reason
-    }
 }
 
 public struct SongBenchEvaluation: Codable, Hashable, Sendable {

@@ -5,16 +5,25 @@ public struct SongwriterPopoverView: View {
     @State private var query = ""
     @State private var sortColumn: SortColumn = .timestamp
     @State private var sortAscending = false
+    @State private var hoveredRowId: String?
 
     private enum SortColumn {
-        case timestamp, title, genre, bpm, type
+        case timestamp, title, genre, bpm, key, meter, type, duration, abc
     }
 
-    private var songs: [SongwriterSongSummary] {
+    /// Every take the API returned, one row each. With `all_revisions=true` the server
+    /// returns one summary per take — each with its own `take_id` and metadata — so the
+    /// client lists them flat; no grouping, expansion, or metadata reconstruction. A take's
+    /// display title is "<title> (Take <revision>)".
+    private var takes: [SongwriterSongSummary] {
         let filtered = query.isEmpty ? vm.songwriterSongs : vm.songwriterSongs.filter {
             $0.title.localizedCaseInsensitiveContains(query) ||
-            $0.summary.localizedCaseInsensitiveContains(query) ||
-            $0.genre.localizedCaseInsensitiveContains(query)
+                $0.summary.localizedCaseInsensitiveContains(query) ||
+                $0.genre.localizedCaseInsensitiveContains(query) ||
+                $0.subgenre.localizedCaseInsensitiveContains(query) ||
+                ($0.key ?? "").localizedCaseInsensitiveContains(query) ||
+                String($0.bpm ?? 0).contains(query) ||
+                "take \($0.revision)".localizedCaseInsensitiveContains(query)
         }
         return filtered.sorted { lhs, rhs in
             let comparison: ComparisonResult
@@ -22,18 +31,30 @@ public struct SongwriterPopoverView: View {
             case .timestamp:
                 comparison = timestampValue(lhs).compare(timestampValue(rhs))
             case .title:
-                comparison = lhs.title.localizedStandardCompare(rhs.title)
+                let byTitle = lhs.title.localizedStandardCompare(rhs.title)
+                comparison = byTitle == .orderedSame
+                    ? (lhs.revision == rhs.revision ? .orderedSame : (lhs.revision < rhs.revision ? .orderedAscending : .orderedDescending))
+                    : byTitle
             case .genre:
                 comparison = lhs.genre.localizedStandardCompare(rhs.genre)
             case .bpm:
-                let left = lhs.bpm ?? 0
-                let right = rhs.bpm ?? 0
+                let left = lhs.bpm ?? 0, right = rhs.bpm ?? 0
                 comparison = left == right ? .orderedSame : (left < right ? .orderedAscending : .orderedDescending)
+            case .key:
+                comparison = (lhs.key ?? "").localizedStandardCompare(rhs.key ?? "")
+            case .meter:
+                comparison = (lhs.time_signature ?? "").localizedStandardCompare(rhs.time_signature ?? "")
             case .type:
                 comparison = typeLabel(lhs).localizedStandardCompare(typeLabel(rhs))
+            case .duration:
+                let left = lhs.duration_hint_sec ?? 0, right = rhs.duration_hint_sec ?? 0
+                comparison = left == right ? .orderedSame : (left < right ? .orderedAscending : .orderedDescending)
+            case .abc:
+                let left = lhs.has_abc == true ? 1 : 0, right = rhs.has_abc == true ? 1 : 0
+                comparison = left == right ? .orderedSame : (left < right ? .orderedAscending : .orderedDescending)
             }
             if comparison == .orderedSame {
-                return lhs.id < rhs.id
+                return lhs.uniqueId < rhs.uniqueId
             }
             return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
@@ -47,9 +68,13 @@ public struct SongwriterPopoverView: View {
             footer
         }
         .padding(16)
-        .frame(width: 760, height: 580, alignment: .topLeading)
+        .frame(width: 900, height: 600, alignment: .topLeading)
         .background(Theme.bgFloat)
-        .onAppear { if vm.isSongwriterEnabled && vm.songwriterSongs.isEmpty { vm.loadSongwriterSongs() } }
+        .onAppear {
+            if vm.isSongwriterEnabled {
+                vm.loadSongwriterSongs(allRevisions: true)
+            }
+        }
     }
 
     private var header: some View {
@@ -62,13 +87,24 @@ public struct SongwriterPopoverView: View {
                     .foregroundColor(Theme.comment)
                     .lineLimit(1)
             }
+
             Spacer()
-            Button(action: { vm.loadSongwriterSongs() }) {
-                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28).contentShape(Rectangle())
+
+            Button(action: { vm.loadSongwriterSongs(allRevisions: true) }) {
+                if vm.isLoadingSongwriter {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
             }
             .buttonStyle(.plain)
             .disabled(vm.isLoadingSongwriter)
             .help("Refresh ready songs")
+
             Button(action: {
                 vm.showSongwriterPopover = false
                 vm.settingsTab = .api
@@ -79,17 +115,43 @@ public struct SongwriterPopoverView: View {
             .buttonStyle(.plain)
             .foregroundColor(Theme.comment)
             .help("Songwriter connection settings")
+
+            Button(action: { vm.showSongwriterPopover = false }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 15))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(Theme.comment)
+            .keyboardShortcut(.cancelAction)
+            .help("Close Songwriter")
         }
     }
 
     private var searchField: some View {
-        TextField("Search title, summary, or genre", text: $query)
-            .textFieldStyle(.plain)
-            .padding(8)
-            .background(Theme.bgDark)
-            .cornerRadius(6)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-            .disabled(vm.isLoadingSongwriter || vm.songwriterError != nil)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(Theme.comment)
+                .font(Theme.small)
+            TextField("Search title, brief, genre, key, BPM, or take...", text: $query)
+                .textFieldStyle(.plain)
+                .font(Theme.body)
+            if !query.isEmpty {
+                Button(action: { query = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Theme.comment)
+                        .font(Theme.small)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Theme.bgDark)
+        .cornerRadius(6)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+        .disabled(vm.isLoadingSongwriter && vm.songwriterSongs.isEmpty)
     }
 
     @ViewBuilder
@@ -103,29 +165,29 @@ public struct SongwriterPopoverView: View {
                           vm.settingsTab = .api
                           vm.showSettingsSheet = true
                       })
-        } else if vm.isLoadingSongwriter {
+        } else if vm.isLoadingSongwriter && vm.songwriterSongs.isEmpty {
             stateView(icon: "arrow.triangle.2.circlepath", title: "Connecting to Songwriter",
                       message: "Loading ready songs from \(SongwriterAPI.configuredBaseURL)…",
                       color: Theme.purple, showsProgress: true)
-        } else if let error = vm.songwriterError {
+        } else if let error = vm.songwriterError, vm.songwriterSongs.isEmpty {
             stateView(icon: "exclamationmark.triangle.fill", title: "Songwriter unavailable",
                       message: error, color: Theme.red, primaryTitle: "Retry",
-                      primaryAction: { vm.loadSongwriterSongs() }, secondaryTitle: "Settings",
+                      primaryAction: { vm.loadSongwriterSongs(allRevisions: true) }, secondaryTitle: "Settings",
                       secondaryAction: { vm.showSongwriterPopover = false; vm.settingsTab = .api; vm.showSettingsSheet = true })
-        } else if songs.isEmpty {
+        } else if takes.isEmpty {
             stateView(icon: query.isEmpty ? "music.note.list" : "magnifyingglass",
-                      title: query.isEmpty ? "No ready songs" : "No matching songs",
-                      message: query.isEmpty ? "Create or mark a song ready in Songwriter, then refresh." : "Try a different title, summary, or genre.",
+                      title: query.isEmpty ? "No ready songs" : "No matching takes",
+                      message: query.isEmpty ? "Create or mark a song ready in Songwriter, then refresh." : "Try a different title, summary, genre, key, or take.",
                       color: Theme.comment, primaryTitle: query.isEmpty ? "Refresh" : nil,
-                      primaryAction: query.isEmpty ? { vm.loadSongwriterSongs() } : nil)
+                      primaryAction: query.isEmpty ? { vm.loadSongwriterSongs(allRevisions: true) } : nil)
         } else {
             VStack(spacing: 0) {
                 tableHeader
                 Divider().background(Theme.border)
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(songs) { song in
-                            songRow(song)
+                        ForEach(takes, id: \.uniqueId) { take in
+                            takeRow(take)
                             Divider().background(Theme.border.opacity(0.45))
                         }
                     }
@@ -137,16 +199,33 @@ public struct SongwriterPopoverView: View {
         }
     }
 
+    // Column widths shared by the header and rows so everything lines up.
+    private enum Col {
+        static let crafted: CGFloat = 108
+        static let title: CGFloat = 195
+        static let genre: CGFloat = 78
+        static let bpm: CGFloat = 40
+        static let key: CGFloat = 50
+        static let meter: CGFloat = 40
+        static let type: CGFloat = 52
+        static let length: CGFloat = 44
+        static let abc: CGFloat = 36
+        static let queue: CGFloat = 240
+    }
+
     private var tableHeader: some View {
         HStack(spacing: 0) {
-            sortHeader("Crafted", column: .timestamp, width: 145, alignment: .leading)
-            sortHeader("Title", column: .title, width: 245, alignment: .leading)
-            sortHeader("Genre", column: .genre, width: 110, alignment: .leading)
-            sortHeader("BPM", column: .bpm, width: 55, alignment: .trailing)
-            sortHeader("Type", column: .type, width: 90, alignment: .leading)
-            Text("Rev")
-                .font(Theme.smallBold).foregroundColor(Theme.comment)
-                .frame(width: 45, alignment: .trailing)
+            sortHeader("Crafted", column: .timestamp, width: Col.crafted, alignment: .leading)
+            sortHeader("Song & Take", column: .title, width: Col.title, alignment: .leading)
+            sortHeader("Genre", column: .genre, width: Col.genre, alignment: .leading)
+            sortHeader("BPM", column: .bpm, width: Col.bpm, alignment: .center)
+            sortHeader("Key", column: .key, width: Col.key, alignment: .center)
+            sortHeader("Meter", column: .meter, width: Col.meter, alignment: .center)
+            sortHeader("Type", column: .type, width: Col.type, alignment: .center)
+            sortHeader("Length", column: .duration, width: Col.length, alignment: .center)
+            sortHeader("ABC", column: .abc, width: Col.abc, alignment: .center)
+            Text("")
+                .frame(width: Col.queue, alignment: .trailing)
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
@@ -170,56 +249,196 @@ public struct SongwriterPopoverView: View {
         .buttonStyle(.plain)
     }
 
-    private func songRow(_ song: SongwriterSongSummary) -> some View {
-        Button(action: { vm.importSongwriterSong(song) }) {
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(timestampText(song)).font(Theme.mono).foregroundColor(Theme.fg)
-                    Text(song.created_at == nil ? "Updated" : "Created")
-                        .font(.system(size: 9)).foregroundColor(song.created_at == nil ? Theme.yellow : Theme.comment)
-                }
-                .frame(width: 145, alignment: .leading)
+    // MARK: - Take row (one per take)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title).font(Theme.smallMedium).foregroundColor(Theme.fg).lineLimit(1)
-                    Text(song.summary).font(.system(size: 9)).foregroundColor(Theme.comment).lineLimit(1)
-                }
-                .frame(width: 245, alignment: .leading)
-
-                Text(song.genre.isEmpty ? "—" : song.genre)
-                    .font(Theme.small).foregroundColor(Theme.fgDark).lineLimit(1)
-                    .frame(width: 110, alignment: .leading)
-                Text(song.bpm.map(String.init) ?? "—")
-                    .font(Theme.mono).foregroundColor(Theme.fgDark)
-                    .frame(width: 55, alignment: .trailing)
-                Text(typeLabel(song))
-                    .font(Theme.small).foregroundColor(song.instrumental ? Theme.cyan : Theme.purple)
-                    .frame(width: 90, alignment: .leading)
-                Text("r\(song.revision)")
-                    .font(Theme.mono).foregroundColor(Theme.comment)
-                    .frame(width: 45, alignment: .trailing)
+    private func takeRow(_ take: SongwriterSongSummary) -> some View {
+        let rowId = take.uniqueId
+        return HStack(spacing: 0) {
+            // Crafted (local time)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(timestampText(take))
+                    .font(Theme.mono)
+                    .foregroundColor(Theme.fg)
+                    .lineLimit(1)
+                Text(take.created_at == nil ? "Updated" : "Created")
+                    .font(.system(size: 9))
+                    .foregroundColor(take.created_at == nil ? Theme.yellow : Theme.comment)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 48)
-            .contentShape(Rectangle())
+            .frame(width: Col.crafted, alignment: .leading)
+
+            // "<title> (Take N)" + brief, so each row says exactly which song and take it is.
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text("\(take.title) (Take \(take.revision))")
+                        .font(Theme.smallMedium)
+                        .foregroundColor(Theme.fg)
+                        .lineLimit(1)
+                    if take.available_revisions.map({ take.revision == ($0.max() ?? take.revision) }) ?? false {
+                        Text("latest")
+                            .font(.system(size: 9, weight: .semibold)).foregroundColor(Theme.green)
+                    }
+                }
+                Text(take.summary)
+                    .font(.system(size: 9))
+                    .foregroundColor(Theme.comment)
+                    .lineLimit(1)
+            }
+            .frame(width: Col.title, alignment: .leading)
+
+            // Genre / subgenre
+            VStack(alignment: .leading, spacing: 1) {
+                Text(take.genre.isEmpty ? "—" : take.genre)
+                    .font(Theme.small)
+                    .foregroundColor(Theme.fgDark)
+                    .lineLimit(1)
+                if !take.subgenre.isEmpty {
+                    Text(take.subgenre)
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.comment)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: Col.genre, alignment: .leading)
+
+            Text(take.bpm.map(String.init) ?? "—")
+                .font(Theme.mono).foregroundColor(Theme.fg)
+                .frame(width: Col.bpm, alignment: .center)
+
+            // Key + scale
+            VStack(spacing: 1) {
+                Text(take.key ?? "—")
+                    .font(Theme.small).foregroundColor(Theme.fgDark).lineLimit(1)
+                if let scale = take.scale, !scale.isEmpty {
+                    Text(scale)
+                        .font(.system(size: 9)).foregroundColor(Theme.comment).lineLimit(1)
+                }
+            }
+            .frame(width: Col.key, alignment: .center)
+
+            Text(take.time_signature ?? "4/4")
+                .font(Theme.mono).foregroundColor(Theme.comment)
+                .frame(width: Col.meter, alignment: .center)
+
+            Text(typeLabel(take))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(take.instrumental ? Theme.cyan : Theme.purple)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background((take.instrumental ? Theme.cyan : Theme.purple).opacity(0.16))
+                .cornerRadius(4)
+                .frame(width: Col.type, alignment: .center)
+
+            Text(durationText(take))
+                .font(Theme.mono).foregroundColor(Theme.comment)
+                .frame(width: Col.length, alignment: .center)
+
+            Group {
+                if take.has_abc == true {
+                    Text("ABC")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(Theme.yellow)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Theme.yellow.opacity(0.18))
+                        .cornerRadius(3)
+                } else {
+                    Text("—").font(Theme.mono).foregroundColor(Theme.comment.opacity(0.4))
+                }
+            }
+            .frame(width: Col.abc, alignment: .center)
+
+            // Per-take actions. Each row's `available_revisions` carries the song's full
+            // take set, so "Queue all N" queues every take of this song in one click
+            // (restoring the single-click bulk queue). "Queue" queues just this take;
+            // "Load" imports this take into the editor.
+            let allTakes = take.allRevisions
+            HStack(spacing: 6) {
+                if allTakes.count > 1 {
+                    Button(action: { vm.queueAllTakes(songId: take.id, title: take.title, takes: allTakes) }) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "text.badge.plus").font(.system(size: 9))
+                            Text("Queue all \(allTakes.count)").font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundColor(Theme.green)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Theme.green.opacity(0.18)).cornerRadius(4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Queue all \(allTakes.count) takes of \(take.title)")
+                }
+
+                Button(action: { vm.queueAllTakes(songId: take.id, title: take.title, takes: [take.revision]) }) {
+                    Text("Queue take").font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Theme.green)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Theme.green.opacity(0.10)).cornerRadius(4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Queue only Take \(take.revision) of \(take.title)")
+
+                Button(action: { vm.importSongwriterSong(take, revision: take.revision) }) {
+                    Text("Load").font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Theme.blue)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Theme.blue.opacity(0.12)).cornerRadius(4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Import Take \(take.revision) into the editor")
+            }
+            .frame(width: Col.queue, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(height: 48)
+        .background(rowBackground(take))
+        .contentShape(Rectangle())
+        .onHover { hovering in setHover(rowId, hovering) }
+        .onTapGesture { vm.importSongwriterSong(take, revision: take.revision) }
     }
 
     private var footer: some View {
         HStack {
-            Text("\(songs.count) song\(songs.count == 1 ? "" : "s")")
+            Text("\(takes.count) take\(takes.count == 1 ? "" : "s")")
                 .font(.system(size: 9)).foregroundColor(Theme.comment)
+
             if let connected = vm.songwriterLastConnectedAt {
                 Label("Connected \(connected.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 9)).foregroundColor(Theme.green)
             }
+
             Spacer()
-            if vm.selectedSongwriterId != nil {
-                Button("Clear imported song") { vm.clearSongwriterSelection() }
-                    .buttonStyle(.plain).font(Theme.small).foregroundColor(Theme.comment)
+
+            if let curTitle = vm.selectedSongwriterTitle, let curId = vm.selectedSongwriterId {
+                HStack(spacing: 6) {
+                    Text("Imported: \(curTitle) (\(curId))" + (vm.selectedSongwriterRevision.map { " Take \($0)" } ?? ""))
+                        .font(Theme.small)
+                        .foregroundColor(Theme.purple)
+                    Button("Clear") { vm.clearSongwriterSelection() }
+                        .buttonStyle(.plain)
+                        .font(Theme.small)
+                        .foregroundColor(Theme.comment)
+                }
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    private func setHover(_ id: String, _ hovering: Bool) {
+        if hovering {
+            hoveredRowId = id
+        } else if hoveredRowId == id {
+            hoveredRowId = nil
+        }
+    }
+
+    // A take is selected when both its song id and revision match the imported selection.
+    private func rowBackground(_ take: SongwriterSongSummary) -> Color {
+        if vm.selectedSongwriterId == take.id && vm.selectedSongwriterRevision == take.revision {
+            return Theme.bgHighlight.opacity(0.35)
+        }
+        if hoveredRowId == take.uniqueId { return Theme.bgHighlight.opacity(0.18) }
+        return Color.clear
     }
 
     private func toggleSort(_ column: SortColumn) {
@@ -231,40 +450,59 @@ public struct SongwriterPopoverView: View {
     }
 
     private func typeLabel(_ song: SongwriterSongSummary) -> String {
-        song.instrumental ? "Instrumental" : "Vocal"
+        song.instrumental ? "Inst" : "Vocal"
+    }
+
+    private func durationText(_ song: SongwriterSongSummary) -> String {
+        guard let sec = song.duration_hint_sec, sec > 0 else { return "—" }
+        let m = Int(sec) / 60
+        let s = Int(sec) % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     private func timestampValue(_ song: SongwriterSongSummary) -> Date {
         parseDate(song.created_at ?? song.updated_at) ?? .distantPast
     }
 
+    // Always render in the device's current local time zone.
     private func timestampText(_ song: SongwriterSongSummary) -> String {
         let date = timestampValue(song)
-        guard date != .distantPast else { return "Unknown" }
-        return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        guard date != .distantPast else { return "—" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter.string(from: date)
     }
 
+    // Parse server timestamps. ISO-8601 (with or without fractional seconds and zone)
+    // is treated as absolute time; bare values are interpreted as UTC. Either way the
+    // Date is absolute, and the formatter above renders it in the local zone.
     private func parseDate(_ value: String) -> Date? {
-        let utcDate = ISO8601DateFormatter().date(from: value)
-        guard let utcDate, utcDate > Date().addingTimeInterval(300) else {
-            return utcDate
-        }
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = isoFractional.date(from: value) { return d }
 
-        // Songwriter currently emits local wall-clock values with a trailing `Z`.
-        // Creation times cannot be in the future, so reinterpret only malformed future
-        // values in the workstation timezone. Correct UTC values remain untouched.
-        let localValue = value.hasSuffix("Z") ? String(value.dropLast()) : value
-        for format in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss"] {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.calendar = Calendar(identifier: .gregorian)
-            formatter.timeZone = .current
-            formatter.dateFormat = format
-            if let localDate = formatter.date(from: localValue) {
-                return localDate
-            }
+        let isoStandard = ISO8601DateFormatter()
+        isoStandard.formatOptions = [.withInternetDateTime]
+        if let d = isoStandard.date(from: value) { return d }
+
+        for format in [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss"
+        ] {
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.calendar = Calendar(identifier: .gregorian)
+            df.timeZone = TimeZone(secondsFromGMT: 0)
+            df.dateFormat = format
+            if let d = df.date(from: value) { return d }
         }
-        return utcDate
+        return nil
     }
 
     @ViewBuilder

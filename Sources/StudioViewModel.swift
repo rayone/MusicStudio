@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AVFoundation
 import AppKit
+import Combine
 import UniformTypeIdentifiers
 import IOKit
 import IOKit.pwr_mgt
@@ -35,16 +36,6 @@ public class StudioViewModel: ObservableObject {
 
     public func isModelDisplayed(id: String) -> Bool {
         displayedModelIds.contains(id)
-    }
-
-    public func toggleModelDisplay(id: String) {
-        if displayedModelIds.contains(id) {
-            if displayedModelIds.count > 1 {
-                displayedModelIds.remove(id)
-            }
-        } else {
-            displayedModelIds.insert(id)
-        }
     }
 
     public func setModelDisplay(id: String, displayed: Bool) {
@@ -109,7 +100,6 @@ Sound of the future rolling through the land
     // Seed configuration (FR-010)
     @Published public var isSeedLocked: Bool = false
     @Published public var lockedSeedString: String = ""
-    @Published public var seed: Int = 0
     @Published public var outputFormat: AudioFormat = .mp3
     @Published public var batchCount: Int = 1
 
@@ -161,7 +151,6 @@ Sound of the future rolling through the land
     @Published public var totalArFrames: Int = 0
     @Published public var currentArFps: Double = 0.0
     @Published public var currentFlowChunk: Int = 0
-    @Published public var totalFlowChunks: Int = 0
 
     // YuE2 Progress metrics
     @Published public var currentNarStep: Int = 0
@@ -195,14 +184,6 @@ Sound of the future rolling through the land
     @Published public var selectedLogComponents: Set<LogComponent> = Set(LogComponent.allCases)
     @Published public var selectedLogLevel: LogLevel = .trace
     // MARK: - Prompt Token Safety (FR-007)
-    public var estimatedCaptionTokens: Int {
-        Int(ceil(Double(caption.count) / 3.5)) + 12
-    }
-
-    public var estimatedLyricsTokens: Int {
-        Int(ceil(Double(lyrics.count) / 3.5)) + 12
-    }
-
     public var totalPromptTokens: Int {
         let textLen = caption.count + lyrics.count
         return Int(ceil(Double(textLen) / 3.5)) + 24
@@ -316,7 +297,6 @@ Sound of the future rolling through the land
     @Published public var sortColumn: String = "title"
     @Published public var sortAscending: Bool = true
     @Published public var activeKeywords: [String] = []
-    @Published public var keywordSuggestions: [Keyword] = []
     @Published public var allKeywords: [Keyword] = []
     @Published public var selectedKey: String = "All"
     @Published public var selectedScale: String = "All"
@@ -354,6 +334,8 @@ Sound of the future rolling through the land
     @Published public var pluginEngineMode: PluginEngineMode = .none
     /// True once a live AU node is active in the playback graph.
     @Published public var pluginLiveActive: Bool = false
+    /// Live plugin bypass state, mirrored from the engine for the player UI toggle.
+    @Published public var effectBypassed: Bool = false
     /// Debounce handle for VST3 near-real-time re-render.
     private var vstRerenderWork: DispatchWorkItem?
     private let auWindow = AudioUnitWindowController()
@@ -411,6 +393,11 @@ Sound of the future rolling through the land
     @Published public var showSongwriterInHeader: Bool = true {
         didSet { UserDefaults.standard.set(showSongwriterInHeader, forKey: "layoutShowSongwriterInHeader") }
     }
+    /// Songwriter popover view mode: false = latest take per song, true = every take.
+    /// Persisted so the choice survives popover reopen and app restart.
+    @Published public var songwriterShowAllTakes: Bool = false {
+        didSet { UserDefaults.standard.set(songwriterShowAllTakes, forKey: "songwriterShowAllTakes") }
+    }
     @Published public var showConsoleOnLaunch: Bool = false {
         didSet { UserDefaults.standard.set(showConsoleOnLaunch, forKey: "layoutShowConsoleOnLaunch") }
     }
@@ -448,25 +435,18 @@ Sound of the future rolling through the land
     }
 
     // Sheets
-    @Published public var showModelManagerSheet: Bool = false {
-        didSet {
-            if showModelManagerSheet {
-                settingsTab = .models
-                showSettingsSheet = true
-                showModelManagerSheet = false
-            }
-        }
-    }
     @Published public var showSettingsSheet: Bool = false
     @Published public var showQueuePopover: Bool = false
-    @Published public var showNewTemplateSheet: Bool = false
     private let audioEngine = AudioEngine()
+    /// Network audio output (casting). Lazily started on first discovery/select.
+    public let netAudio: NetAudioController
     private var playbackTimer: Timer?
     private var sleepAssertionId: IOPMAssertionID = 0
     @Published public var lastWorkerError: String? = nil
     private var workerProcess: Process?
     private var evaluationProcess: Process?
     private var isSeeking = false
+    private var netAudioCancellables = Set<AnyCancellable>()
 
     public init() {
         self.homeDirectory = SetupManager.defaultHomeDirectory
@@ -476,6 +456,13 @@ Sound of the future rolling through the land
 
         let bundleResourceURL = Bundle.main.resourceURL ?? URL(fileURLWithPath: "Resources")
         self.studioScript = bundleResourceURL.appendingPathComponent("studio.py").path
+
+        // Network audio sidecar (Resources/netaudio.py), sharing the engine venv.
+        let netScript = bundleResourceURL.appendingPathComponent("netaudio.py").path
+        self.netAudio = NetAudioController(
+            pythonBin: SetupManager.pythonBinURL.path,
+            scriptPath: netScript,
+            homePath: SetupManager.defaultHomeDirectory.path)
 
         // Hook DB logging
         DB.logger = { [weak self] comp, lvl, msg, det in
@@ -490,6 +477,19 @@ Sound of the future rolling through the land
         }
 
         self.appendLog(component: .app, level: .info, message: "MusicStudio initialized", detail: "home=\(homeDirectory.path) db=\(dbPath)")
+
+        // Route network audio sidecar logs into the console, and react to state changes
+        // so the audio tap follows the casting session.
+        self.netAudio.setLogHandler { [weak self] comp, lvl, msg, det in
+            DispatchQueue.main.async {
+                self?.appendLog(component: comp, level: lvl, message: msg, detail: det)
+            }
+        }
+        self.observeNetAudioState()
+        // Point 1: spawn the network-audio sidecar and start discovering receivers at
+        // launch. The sidecar is a separate process with its own asyncio loop and a
+        // background discovery task, so this runs off the UI thread.
+        self.netAudio.autoStart()
 
         self.refreshModels()
         self.loadHistory()
@@ -524,6 +524,7 @@ Sound of the future rolling through the land
         if UserDefaults.standard.object(forKey: "layoutShowSongwriterInHeader") != nil {
             self.showSongwriterInHeader = UserDefaults.standard.bool(forKey: "layoutShowSongwriterInHeader")
         }
+        self.songwriterShowAllTakes = UserDefaults.standard.bool(forKey: "songwriterShowAllTakes")
         self.showConsoleOnLaunch = UserDefaults.standard.bool(forKey: "layoutShowConsoleOnLaunch")
         self.showConsole = self.showConsoleOnLaunch
 
@@ -587,7 +588,7 @@ Sound of the future rolling through the land
         }
     }
 
-    public func loadSongwriterSongs() {
+    public func loadSongwriterSongs(allRevisions: Bool = false) {
         guard isSongwriterEnabled else {
             songwriterSongs = []
             songwriterError = nil
@@ -599,7 +600,7 @@ Sound of the future rolling through the land
         songwriterError = nil
         Task {
             do {
-                songwriterSongs = try await SongwriterAPI.shared.songs()
+                songwriterSongs = try await SongwriterAPI.shared.songs(allRevisions: allRevisions)
                 songwriterError = nil
                 songwriterLastConnectedAt = Date()
             } catch let error as URLError {
@@ -613,13 +614,14 @@ Sound of the future rolling through the land
         }
     }
 
-    public func importSongwriterSong(_ summary: SongwriterSongSummary) {
+    public func importSongwriterSong(_ summary: SongwriterSongSummary, revision: Int? = nil) {
         guard !isLoadingSongwriter else { return }
         isLoadingSongwriter = true
         songwriterError = nil
+        let targetRevision = revision ?? summary.revision
         Task {
             do {
-                let song = try await SongwriterAPI.shared.song(id: summary.id)
+                let song = try await SongwriterAPI.shared.song(id: summary.id, revision: targetRevision)
                 let input = selectedModelFamily == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
                 caption = input?.style ?? input?.caption ?? song.creative.caption
                 lyrics = input?.lyrics ?? song.creative.lyrics
@@ -635,8 +637,7 @@ Sound of the future rolling through the land
                 selectedSongwriterId = song.id
                 selectedSongwriterRevision = song.revision
                 selectedSongwriterTitle = song.title
-                showSongwriterPopover = false
-                statusText = "Imported from Songwriter: \(song.title)"
+                statusText = "Imported from Songwriter: \(song.title) (Take \(song.revision))"
                 appendLog(component: .ui, level: .info, message: "Imported Songwriter song", detail: "id=\(song.id) revision=\(song.revision)")
             } catch {
                 songwriterError = error.localizedDescription
@@ -650,6 +651,89 @@ Sound of the future rolling through the land
         selectedSongwriterRevision = nil
         selectedSongwriterTitle = nil
         statusText = "Songwriter association cleared"
+    }
+
+    /// Queue every take of a Songwriter song as one job each, under a shared batch.
+    /// Each take is fetched individually so its own caption/lyrics/ABC are used.
+    /// Honors the current model, duration, steps, guidance and output format.
+    /// `takes` is the full revision list for the song id (already grouped by the caller).
+    public func queueAllTakes(songId: String, title: String, takes: [Int]) {
+        guard !takes.isEmpty else { return }
+
+        let runModel = selectedModel
+        let family = selectedModelFamily
+        let runDuration = duration
+        let runSteps = steps
+        let runGuidance = guidance
+        let runFormat = outputFormat.rawValue
+        let runCot = cotMode.rawValue
+        let usesAbc = usesAbcScore
+        let batchId = UUID().uuidString
+        let shouldStart = !isGenerating
+        if isQueuePaused { setQueuePaused(false) }
+
+        statusText = "Queuing \(takes.count) take\(takes.count == 1 ? "" : "s") of \(title)…"
+        appendLog(component: .queue, level: .info, message: "Queue all takes requested",
+                  detail: "id=\(songId) takes=\(takes.count)")
+
+        Task {
+            var queued = 0
+            var position = DB.shared?.nextQueuedPosition() ?? 1
+            for take in takes {
+                do {
+                    let song = try await SongwriterAPI.shared.song(id: songId, revision: take)
+                    let input = family == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
+                    let takeCaption = input?.style ?? input?.caption ?? song.creative.caption
+                    let takeLyrics = input?.lyrics ?? song.creative.lyrics
+
+                    var paramsObj: [String: Any] = [
+                        "duration": runDuration,
+                        "steps": runSteps,
+                        "guidance": runGuidance,
+                        "format": runFormat,
+                        "cot": runCot,
+                        "songwriter_id": song.id,
+                        "songwriter_revision": song.revision,
+                        "songwriter_title": song.title
+                    ]
+
+                    // YuE2 symbolic CoT only: snapshot the take's own ABC score durably.
+                    if family == .yue2, usesAbc,
+                       let abc = input?.abc_score,
+                       !abc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let abcDir = homeDirectory.appendingPathComponent("queue-abc", isDirectory: true)
+                        let queuedAbc = abcDir.appendingPathComponent("score_\(UUID().uuidString).abc")
+                        try FileManager.default.createDirectory(at: abcDir, withIntermediateDirectories: true)
+                        try abc.write(to: queuedAbc, atomically: true, encoding: .utf8)
+                        paramsObj["abc_file"] = queuedAbc.path
+                    }
+
+                    let paramsJson = (try? String(data: JSONSerialization.data(withJSONObject: paramsObj), encoding: .utf8)) ?? "{}"
+                    let jobSeed = Int.random(in: 100_000...999_999_999)
+                    let jobId = DB.shared?.enqueueJob(
+                        batchId: batchId,
+                        modelId: runModel,
+                        caption: takeCaption,
+                        lyrics: takeLyrics,
+                        seed: jobSeed,
+                        params: paramsJson,
+                        position: position
+                    ) ?? -1
+                    position += 1
+                    if jobId > 0 { queued += 1 }
+                    appendLog(component: .queue, level: jobId > 0 ? .info : .error,
+                              message: "Queued Take \(take) of \(title)",
+                              detail: "seed=\(jobSeed) id=\(jobId)")
+                } catch {
+                    appendLog(component: .queue, level: .error,
+                              message: "Failed to queue Take \(take)", detail: "error=\(error)")
+                }
+            }
+
+            self.refreshQueueDepth()
+            self.statusText = "Queued \(queued) of \(takes.count) take\(takes.count == 1 ? "" : "s") of \(title)"
+            if shouldStart { self.startWorkerIfNeeded() }
+        }
     }
 
     // MARK: - Defaults & Layout Actions
@@ -914,12 +998,6 @@ Sound of the future rolling through the land
         let base = formulaSongSeconds()
         let baseDur = max(duration, 1)
         return base * (audioDuration / baseDur)
-    }
-
-    /// Engine progress events describe the current stage only. ETA and percentage are owned
-    /// exclusively by the monotonic wall-clock ticker so sparse stage events cannot make them jump.
-    func updateLiveProgress(fraction: Double, rateRemaining: Double? = nil) {
-        recomputeQueueEta()
     }
 
     /// One monotonic clock owns both remaining time and percentage. The runtime estimate is
@@ -1285,21 +1363,6 @@ Sound of the future rolling through the land
         }
     }
 
-    public func toggleKeyword(_ term: String) {
-        if activeKeywords.contains(term) {
-            removeKeyword(term)
-        } else {
-            addKeyword(term)
-        }
-    }
-
-    public func addKeyword(_ term: String) {
-        if !activeKeywords.contains(term) {
-            activeKeywords.append(term)
-            filterTemplates()
-        }
-    }
-
     public func removeKeyword(_ term: String) {
         activeKeywords.removeAll { $0 == term }
         filterTemplates()
@@ -1338,10 +1401,6 @@ Sound of the future rolling through the land
         } else {
             lyrics += "\n\n" + tag + "\n"
         }
-    }
-
-    public func randomizeSeed() {
-        self.seed = Int.random(in: 100_000...999_999_999)
     }
 
     // MARK: - Queue & Generation Execution
@@ -1711,11 +1770,6 @@ Sound of the future rolling through the land
         statusText = "Queue cleared"
     }
 
-    public func cancelJob(id: Int) {
-        DB.shared.cancelJob(id: id)
-        refreshQueueDepth()
-    }
-
     /// Remove only this item. Removing the running item kills its worker; remaining queued
     /// items continue automatically. Removing a queued item does not affect processing.
     public func stopJob(id: Int, isRunning: Bool) {
@@ -1851,6 +1905,10 @@ Sound of the future rolling through the land
     }
 
     // MARK: - Audio Playback
+    /// Load a file into the single playback engine. Output routing (Mac speakers or a
+    /// receiver) is independent of this call: while casting, the network sink follows
+    /// the engine through the post-effect tap, so track changes, plugins and seeks
+    /// reach the receiver without any file being handed to it.
     public func playAudio(path: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
         stopAudio()
@@ -1860,25 +1918,53 @@ Sound of the future rolling through the land
             self.currentPlayingFile = path
             self.audioDuration = audioEngine.durationSeconds
             startPlaybackTimer()
+            if isCasting { netAudio.setTitle(URL(fileURLWithPath: path).lastPathComponent) }
         } catch {
             self.statusText = "Playback error: \(error.localizedDescription)"
         }
     }
 
     public func togglePlayPause() {
-        guard currentPlayingFile != nil else {
-            if let first = history.first {
-                playAudio(path: first.output_file)
-            }
+        // The engine owns the playhead whether output is local or a receiver. Pausing
+        // the engine stops the tapped PCM (so the receiver goes quiet) without tearing
+        // down the session; resuming continues from the same position.
+        guard currentPlayingFile != nil || audioEngine.isPlaying else {
+            if let first = history.first { playAudio(path: first.output_file) }
             return
         }
         if audioEngine.isPlaying {
             audioEngine.pause()
-            self.isPlayingAudio = false
+            isPlayingAudio = false
+            if isCasting { netAudio.transport("pause") }
         } else {
             audioEngine.resume()
-            self.isPlayingAudio = true
+            isPlayingAudio = true
+            if isCasting { netAudio.transport("resume") }
         }
+    }
+
+    /// Toggle the live plugin bypass. Flips AU processing without touching the graph or
+    /// playhead; while casting, the streamed audio changes and the session stays up.
+    public func toggleEffectBypass() {
+        audioEngine.setEffectBypassed(!audioEngine.effectBypassed)
+        effectBypassed = audioEngine.effectBypassed
+    }
+
+    /// Advance to the next / previous track in the queue (history list). Works
+    /// identically for local and receiver output: it moves the engine to the new file;
+    /// while casting, the live tap follows automatically.
+    public func nextTrack() { stepTrack(by: +1) }
+    public func previousTrack() { stepTrack(by: -1) }
+
+    private func stepTrack(by delta: Int) {
+        guard !history.isEmpty else { return }
+        let cur = currentPlayingFile
+        let idx = history.firstIndex { $0.output_file == cur } ?? 0
+        let next = idx + delta
+        guard next >= 0 && next < history.count else { return }
+        let item = history[next]
+        selectedTrack = item
+        playAudio(path: item.output_file)   // receiver session stays up; tap follows
     }
 
     public func stopAudio() {
@@ -1888,6 +1974,127 @@ Sound of the future rolling through the land
         self.audioProgress = 0.0
         playbackTimer?.invalidate()
         playbackTimer = nil
+    }
+
+    // MARK: - Network Audio (Casting)
+    //
+    // File-based casting: when a renderer is selected, local playback stops and the
+    // selected track file is served to the receiver at full rate (the live-tap model
+    // left receivers silent and also played locally). The player bar's transport then
+    // controls the remote session.
+
+    private func observeNetAudioState() {
+        netAudio.$state
+            .removeDuplicates()
+            .sink { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .streaming:
+                    // Receiver accepted the stream: now (and only now) silence the
+                    // local speaker. Report measured session startup time.
+                    if self.networkTapActive, !self.audioEngine.localMuted {
+                        self.audioEngine.setLocalMuted(true)
+                        if let t0 = self.castStartTime {
+                            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+                            self.appendLog(component: .netaudio, level: .info,
+                                message: "Receiver accepted stream; local output muted",
+                                detail: "session startup \(ms) ms (sidecar-accept to mute; " +
+                                        "not measured to speaker output)")
+                            self.castStartTime = nil
+                        }
+                    }
+                    self.isPlayingAudio = self.audioEngine.isPlaying
+                case .error:
+                    // Setup failed: keep local audible, surface the error.
+                    self.teardownNetworkTap(restoreLocal: true)
+                    if let e = self.netAudio.lastError {
+                        self.statusText = "Network output error: \(e)"
+                    }
+                case .idle, .stopped:
+                    self.teardownNetworkTap(restoreLocal: true)
+                default:
+                    break
+                }
+            }
+            .store(in: &netAudioCancellables)
+    }
+
+    private var networkTapActive = false
+    private var castStartTime: Date?
+
+    private func startNetworkTapIfNeeded() {
+        guard !networkTapActive else { return }
+        let fmt = audioEngine.tapFormat
+        netAudio.configureFeed(sampleRate: fmt.sampleRate, channels: fmt.channels)
+        let net = netAudio   // feedPCM is nonisolated; avoid hopping through self
+        audioEngine.startNetworkTap { data in net.feedPCM(data) }
+        networkTapActive = true
+        appendLog(component: .netaudio, level: .info,
+                  message: "Streaming live post-effect PCM to receiver",
+                  detail: "sr=\(fmt.sampleRate) ch=\(fmt.channels)")
+    }
+
+    private func teardownNetworkTap(restoreLocal: Bool) {
+        guard networkTapActive else {
+            if restoreLocal { audioEngine.setLocalMuted(false) }
+            return
+        }
+        audioEngine.stopNetworkTap()   // also restores local volume
+        networkTapActive = false
+        appendLog(component: .netaudio, level: .info,
+                  message: "Stopped network stream; local output restored", detail: "")
+    }
+
+    /// Begin discovery (starts the sidecar on first call).
+    public func discoverReceivers() {
+        netAudio.discover()
+    }
+
+    /// Select a receiver for LIVE processed-PCM streaming. The engine keeps rendering
+    /// at its current playhead with the plugin chain intact; we start the tap, tell the
+    /// sidecar to open a live stream, and mute local output only once the receiver
+    /// accepts (handled in observeNetAudioState). On setup failure local stays audible.
+    public func castTo(_ receiver: NetReceiver) {
+        castStartTime = Date()
+        // Ensure something is playing so the tap has audio; keep position + plugin.
+        // Preserve the playhead: only load a track if none is loaded yet.
+        if currentPlayingFile == nil, let path = currentCastableTrackPath {
+            playAudio(path: path)
+        }
+        startNetworkTapIfNeeded()
+        // Live stream: no file path, so the sidecar serves the continuous tap buffer.
+        netAudio.selectLive(receiver, title: currentTrackTitle)
+    }
+
+    /// Stop the receiver session and restore local output at the engine's current
+    /// playhead (the graph never stopped, so this is seamless).
+    public func stopCasting() {
+        netAudio.stop()
+        teardownNetworkTap(restoreLocal: true)
+        isPlayingAudio = audioEngine.isPlaying
+    }
+
+    private var currentTrackTitle: String {
+        currentCastableTrackPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+    }
+
+    /// The file we would cast: whatever is loaded in the player, else the selected
+    /// track, else the most recent history item.
+    private var currentCastableTrackPath: String? {
+        if let f = currentPlayingFile { return f }
+        if let t = selectedTrack { return t.output_file }
+        return history.first?.output_file
+    }
+
+    /// Is audio currently going to a network receiver? Requires an actually-active
+    /// receiver, not just a lingering state, so local operations (plugin previews,
+    /// live AU) are never accidentally redirected after a casting session ends.
+    public var isCasting: Bool {
+        guard netAudio.activeReceiverID != nil else { return false }
+        switch netAudio.state {
+        case .streaming, .connecting, .reconnecting, .paused: return true
+        default: return false
+        }
     }
 
     // MARK: - Studio Inspector
@@ -1963,6 +2170,10 @@ Sound of the future rolling through the land
         pluginStatus = "Loading \(URL(fileURLWithPath: path).lastPathComponent)…"
         let isAU = AudioUnitHost.isAudioUnit(path: path)
         let renderPath = isAU ? (AudioUnitHost.sibling(of: path, ext: "vst3") ?? path) : path
+        // Live hosting is what puts the effect into the engine graph, and therefore into
+        // the post-effect tap that feeds a receiver. Prefer the AU build whenever one is
+        // installed, even if the user picked the .vst3.
+        let liveAUPath = isAU ? path : AudioUnitHost.sibling(of: path, ext: "component")
         let py = pythonBin, script = studioScript, home = homeDirectory.path
         // --list-params requires an input arg; use the selected track or any placeholder.
         let inputArg = selectedTrack?.output_file ?? "/dev/null"
@@ -2002,10 +2213,12 @@ Sound of the future rolling through the land
                 if !plugin.isEffect {
                     self.pluginEngineMode = .none
                     self.pluginStatus = "\(plugin.name) is an instrument, not an effect."
-                } else if isAU {
+                } else if let auPath = liveAUPath {
                     self.pluginEngineMode = .realtimeAU
-                    self.activateLiveAU(path: path, name: plugin.name)
+                    self.activateLiveAU(path: auPath, name: plugin.name)
                 } else {
+                    // VST3 with no AU build: AVAudioEngine can't host VST3 in real time,
+                    // so this falls back to offline preview renders.
                     self.pluginEngineMode = .offline
                     self.pluginStatus = "Loaded \(plugin.name). Preview updates shortly after you change a value."
                 }
@@ -2132,6 +2345,7 @@ Sound of the future rolling through the land
             switch result {
             case .success:
                 self.pluginLiveActive = true
+                self.effectBypassed = false
                 self.bindLiveAUParameters()
                 self.audioEngine.observeEffectParameters { [weak self] address, value in
                     self?.liveParameterDidChange(address: address, value: value)
@@ -2350,10 +2564,29 @@ Sound of the future rolling through the land
         isSeeking = true
     }
 
+    /// Commit one seek on slider release. The engine owns the playhead, so seeking the
+    /// local graph moves the tapped PCM too. While casting we also flush the receiver's
+    /// queued audio and restart its session so it doesn't keep playing stale buffered
+    /// samples from the old position. Latest-request-wins via a monotonically bumped
+    /// token so a second seek during a restart supersedes the first.
     public func endSeek(to time: Double) {
-        audioEngine.seek(to: time)
         isSeeking = false
+        audioEngine.seek(to: time)
+        audioProgress = time
+        guard isCasting else { return }
+        seekToken &+= 1
+        let token = seekToken
+        let t0 = Date()
+        netAudio.seek(to: time) { [weak self] in
+            guard let self, token == self.seekToken else { return }  // superseded
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            self.appendLog(component: .netaudio, level: .info,
+                message: "Seek committed; receiver stream flushed/restarted",
+                detail: "restart \(ms) ms (command round-trip; not measured to speaker output)")
+        }
     }
+
+    private var seekToken: Int = 0
 
     private func startPlaybackTimer() {
         playbackTimer?.invalidate()

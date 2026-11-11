@@ -1,7 +1,7 @@
 # MusicStudio–Songwriter API Contract
 
-Contract-Version: 3
-Updated-At: 2026-09-23T12:30:00Z
+Contract-Version: 4
+Updated-At: 2026-11-11T08:42:54Z
 Status: Confirmed & Implemented
 Updated-By: Songwriter & MusicStudio Collaboration
 
@@ -43,10 +43,15 @@ In local development, any non-empty token is accepted when `SONGWRITER_API_KEY` 
 ## 1. List available songs
 
 ```http
-GET /v1/songs?status=ready&limit=50&cursor=<optional>
+GET /v1/songs?status=ready&limit=50&cursor=<optional>&all_revisions=<bool>
 Authorization: Bearer <token>
 Accept: application/json
 ```
+
+`all_revisions` (default `false`):
+
+- `false` — one row per song: the latest take. `available_revisions` lists every take newest-first; `take_id`/`revision` identify that latest take.
+- `true` — **one row per take** (flat; no nesting). Each row carries that take's own metadata and a `take_id` unique across the whole response. MusicStudio renders these directly as separate list entries titled `"<title> (Take <revision>)"`.
 
 Response:
 
@@ -56,6 +61,8 @@ Response:
     {
       "id": "song_test_01",
       "revision": 1,
+      "take_id": "song_test_01:1",
+      "available_revisions": [1],
       "title": "Neon Horizon",
       "summary": "Story about cybernetic neon nights",
       "genre": "Synth-pop",
