@@ -11,6 +11,11 @@ import AudioToolbox
 public final class AudioEngine {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// Dedicated mixer between the effect and the main mixer. The network tap lives
+    /// here so it captures full-level post-effect PCM regardless of the local speaker
+    /// volume. (Verified: a tap on mainMixerNode is POST-volume, so muting the speaker
+    /// there would also zero the network stream; a pre-mix tap node avoids that.)
+    private let tapMixer = AVAudioMixerNode()
     private var effect: AVAudioUnit?
     private var file: AVAudioFile?
 
@@ -19,23 +24,162 @@ public final class AudioEngine {
     public private(set) var isPlaying = false
     public private(set) var durationSeconds: Double = 0
 
+    // MARK: - Network audio tap (processed-PCM sink)
+    //
+    // One engine, one plugin chain. The mixer tap captures the SAME post-effect PCM
+    // that feeds the local speakers, so a network sink receives exactly what the Mac
+    // would play (including live AU effects, or dry when bypassed). In network mode the
+    // graph keeps rendering and only the local speaker branch is silenced
+    // (mainMixer.outputVolume = 0), so switching Mac<->receiver mid-track preserves
+    // position and plugin state.
+
+    /// Called with interleaved little-endian int16 PCM for each tap buffer while a
+    /// network output is active. Set by the view model to forward audio to the sidecar.
+    private var tapHandler: ((Data) -> Void)?
+    /// Converts the mixer's native float format to the int16 interleaved format the
+    /// sidecar/receivers expect. Rebuilt whenever the tap format changes.
+    private var tapConverter: AVAudioConverter?
+    private var tapOutputFormat: AVAudioFormat?
+    private var tapInstalled = false
+    /// Preallocated int16 scratch so the audio callback copies into fixed memory
+    /// rather than allocating per buffer. Sized for the largest expected tap buffer.
+    private var tapScratch: UnsafeMutablePointer<Int16>?
+    private var tapScratchCapacity = 0
+    /// Whether the local speaker branch is muted (network-only output).
+    public private(set) var localMuted = false
+    /// The user's local output volume before muting, restored on switch-back.
+    private var savedLocalVolume: Float = 1.0
+
+    /// The format the network tap delivers: the tap mixer's sample rate, stereo, int16.
+    public var tapFormat: (sampleRate: Int, channels: Int) {
+        let sr = tapMixer.outputFormat(forBus: 0).sampleRate
+        return (Int(sr > 0 ? sr : 48000), 2)
+    }
+
+    /// Silence (or restore) only the local speaker branch, downstream of the tap. The
+    /// graph keeps rendering so the network tap keeps feeding audio; playback position
+    /// and plugin state are untouched. Restores the user's previous volume on unmute.
+    public func setLocalMuted(_ muted: Bool) {
+        guard muted != localMuted else { return }
+        if muted {
+            savedLocalVolume = engine.mainMixerNode.outputVolume
+            engine.mainMixerNode.outputVolume = 0.0
+        } else {
+            engine.mainMixerNode.outputVolume = savedLocalVolume
+        }
+        localMuted = muted
+    }
+
+    /// Start forwarding full-level post-effect PCM from the tap mixer to `handler` as
+    /// int16 interleaved. Idempotent. Encoding and network I/O happen in `handler`
+    /// (off this render callback).
+    public func startNetworkTap(_ handler: @escaping (Data) -> Void) {
+        self.tapHandler = handler
+        guard !tapInstalled else { return }
+        if !engine.isRunning { try? engine.start() }
+        let inFormat = tapMixer.outputFormat(forBus: 0)
+        guard inFormat.sampleRate > 0,
+              let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                            sampleRate: inFormat.sampleRate,
+                                            channels: 2,
+                                            interleaved: true) else { return }
+        self.tapOutputFormat = outFormat
+        self.tapConverter = AVAudioConverter(from: inFormat, to: outFormat)
+        // Preallocate scratch for up to 8192 frames stereo int16.
+        let cap = 8192 * 2
+        tapScratch?.deallocate()
+        tapScratch = UnsafeMutablePointer<Int16>.allocate(capacity: cap)
+        tapScratchCapacity = cap
+        tapMixer.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+            self?.forwardTapBuffer(buffer)
+        }
+        tapInstalled = true
+    }
+
+    /// Remove the network tap and restore local output.
+    public func stopNetworkTap() {
+        if tapInstalled {
+            tapMixer.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        tapHandler = nil
+        tapConverter = nil
+        tapOutputFormat = nil
+        tapScratch?.deallocate()
+        tapScratch = nil
+        tapScratchCapacity = 0
+        setLocalMuted(false)
+    }
+
+    private func forwardTapBuffer(_ input: AVAudioPCMBuffer) {
+        guard let handler = tapHandler,
+              let converter = tapConverter,
+              let outFormat = tapOutputFormat else { return }
+        let ratio = outFormat.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 16
+        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat,
+                                               frameCapacity: capacity) else { return }
+        var error: NSError?
+        let box = UncheckedSendableBox(input)
+        var fed = false
+        let status = converter.convert(to: outBuffer, error: &error) { _, outStatus in
+            if fed { outStatus.pointee = .noDataNow; return nil }
+            fed = true
+            outStatus.pointee = .haveData
+            return box.value
+        }
+        guard status != .error, outBuffer.frameLength > 0,
+              let channelData = outBuffer.int16ChannelData else { return }
+        let sampleCount = Int(outBuffer.frameLength) * Int(outFormat.channelCount)
+        // Copy into preallocated scratch (no per-callback heap alloc), then wrap for the
+        // handler. The handler enqueues onto its own queue and returns immediately, so
+        // encoding and socket I/O never run on this render thread.
+        let byteCount = sampleCount * MemoryLayout<Int16>.size
+        if let scratch = tapScratch, sampleCount <= tapScratchCapacity {
+            scratch.update(from: channelData[0], count: sampleCount)
+            let data = Data(bytes: scratch, count: byteCount)
+            handler(data)
+        } else {
+            let data = Data(bytes: channelData[0], count: byteCount)
+            handler(data)
+        }
+    }
+
+    /// Fixed format of tapMixer's output (= the network stream format). Connected once
+    /// and never reconnected: reconnecting the tapped node at a new rate (e.g. on a
+    /// track change from a 44.1 kHz to a 48 kHz file, or a plugin insert) silently
+    /// invalidated the tap and the receiver went silent. The mixer resamples inputs.
+    private var streamFormat: AVAudioFormat?
+
     public init() {
         engine.attach(player)
+        engine.attach(tapMixer)
+        tapMixer.outputVolume = 1.0
+        let hwRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: hwRate > 0 ? hwRate : 48000,
+                                channels: 2)!
+        streamFormat = fmt
+        engine.connect(tapMixer, to: engine.mainMixerNode, format: fmt)
     }
 
     // MARK: - Graph
 
     private func rebuildGraph() {
-        // Disconnect everything, then wire player -> (effect?) -> mainMixer.
+        // Permanent path for all playback (plugin enabled OR bypassed):
+        //   player -> [effect] -> tapMixer -> mainMixer -> device
+        // Only the nodes UPSTREAM of tapMixer are rewired here; tapMixer -> mainMixer
+        // stays connected at the fixed stream format so an installed tap survives
+        // track changes and plugin swaps.
         engine.disconnectNodeOutput(player)
         if let effect { engine.disconnectNodeOutput(effect) }
-        let fmt = file?.processingFormat
-            ?? engine.mainMixerNode.outputFormat(forBus: 0)
+        // Source keeps its own rate/layout up to tapMixer, which converts to the stream
+        // format.
+        let fmt = file?.processingFormat ?? streamFormat
         if let effect {
             engine.connect(player, to: effect, format: fmt)
-            engine.connect(effect, to: engine.mainMixerNode, format: fmt)
+            engine.connect(effect, to: tapMixer, format: fmt)
         } else {
-            engine.connect(player, to: engine.mainMixerNode, format: fmt)
+            engine.connect(player, to: tapMixer, format: fmt)
         }
     }
 
@@ -134,6 +278,7 @@ public final class AudioEngine {
         }
         engine.attach(au)
         effect = au
+        effectBypassed = false
         rebuildGraph()
         // Re-schedule from the current position so the new node is in the live path.
         if file != nil {
@@ -151,6 +296,7 @@ public final class AudioEngine {
         engine.disconnectNodeOutput(old)
         engine.detach(old)
         effect = nil
+        effectBypassed = false
         rebuildGraph()
         if file != nil {
             scheduleAndPlay(from: resumeAt)
@@ -159,6 +305,19 @@ public final class AudioEngine {
     }
 
     public var currentEffect: AVAudioUnit? { effect }
+
+    /// Whether the live effect is currently bypassed.
+    public private(set) var effectBypassed = false
+
+    /// Toggle the live AU's processing on/off WITHOUT touching the graph or the
+    /// playhead. Uses the AU's `shouldBypassEffect`, so audio keeps flowing (dry when
+    /// bypassed, wet when active), the position keeps advancing, and a network session
+    /// stays connected while the streamed audio changes.
+    public func setEffectBypassed(_ bypassed: Bool) {
+        guard let au = effect else { return }
+        au.auAudioUnit.shouldBypassEffect = bypassed
+        effectBypassed = bypassed
+    }
 
     // MARK: - AU-native parameters
     // The live AU is the source of truth for its own parameters (names/ranges differ
@@ -303,4 +462,12 @@ public final class AudioEngine {
             }
         }
     }
+}
+
+/// Transfers a non-Sendable value through a @Sendable boundary where the programmer
+/// has verified the access is actually single-threaded (here: the AVAudioConverter
+/// input block runs synchronously on the calling thread).
+private struct UncheckedSendableBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }

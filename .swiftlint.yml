@@ -1,0 +1,56 @@
+# SwiftLint configuration for MusicStudio.
+# Focused on correctness and performance rules; style noise is relaxed so the
+# signal stays high for a single-developer SwiftUI codebase.
+
+included:
+  - Sources
+
+# Opt-in rules that catch real performance and correctness problems.
+opt_in_rules:
+  - empty_count                      # items.count == 0  -> items.isEmpty
+  - empty_string                     # str == ""         -> str.isEmpty
+  - first_where                      # filter {}.first   -> first(where:)
+  - last_where                       # filter {}.last    -> last(where:)
+  - contains_over_first_not_nil      # first(where:) != nil -> contains(where:)
+  - contains_over_filter_count       # filter {}.count > 0  -> contains(where:)
+  - contains_over_filter_is_empty
+  - contains_over_range_nil_comparison
+  - reduce_into                      # reduce with copy  -> reduce(into:)
+  - toggle_bool
+  - redundant_nil_coalescing
+  - empty_collection_literal
+  - joined_default_parameter
+  - prefer_zero_over_explicit_init
+  - sorted_first_last                # sorted().first    -> min()/max()
+
+# Style rules that would only generate noise are disabled.
+disabled_rules:
+  - line_length
+  - function_body_length
+  - type_body_length
+  - file_length
+  - cyclomatic_complexity
+  - identifier_name
+  - type_name
+  - nesting
+  - todo
+  - trailing_whitespace
+  - trailing_comma
+  - large_tuple
+  - force_cast
+  - function_parameter_count
+  # Idiomatic SwiftUI / deliberate layout choices, not correctness issues:
+  - multiple_closures_with_trailing_closure  # .alert/.confirmationDialog patterns
+  - statement_position                        # catch/else layout preference
+  - implicit_optional_initialization          # explicit `= nil` reads clearer here
+  - vertical_whitespace
+  # Raw enum values are serialized to JSON/DB/CLI, so keep them explicit on purpose:
+  - redundant_string_enum_value
+
+# unused_declaration / unused_import require whole-module analysis
+# (run via `swiftlint analyze`).
+analyzer_rules:
+  - unused_import
+  - unused_declaration
+
+reporter: "xcode"

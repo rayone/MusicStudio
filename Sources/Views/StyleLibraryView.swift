@@ -11,7 +11,7 @@ public struct FlowLayout: Layout {
         let maxWidth = proposal.width ?? .infinity
         var x: CGFloat = 0
         var rowHeight: CGFloat = 0
-        var total = CGSize(width: 0, height: 0)
+        var total = CGSize.zero
 
         for v in subviews {
             let s = v.sizeThatFits(.unspecified)
@@ -190,7 +190,7 @@ public struct StyleLibraryView: View {
             // Presets Table
             tableHeader
 
-            ScrollViewReader { proxy in
+            ScrollViewReader { _ in
                 ScrollView {
                     LazyVStack(spacing: 1) {
                         ForEach(vm.filteredTemplates) { pt in

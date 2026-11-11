@@ -174,6 +174,9 @@ public struct ConsoleTextView: NSViewRepresentable {
         case .lyrics: return Theme.green
         case .abc: return Theme.yellow
         case .fs: return Theme.comment
+
+        // Network audio / casting
+        case .netaudio: return Theme.green
         }
     }
 

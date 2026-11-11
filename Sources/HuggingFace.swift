@@ -7,13 +7,6 @@ public struct HFModelItem: Identifiable, Codable, Hashable {
     public var likes: Int?
     public var lastModified: String?
     public var tags: [String]?
-
-    public var shortName: String {
-        if let slash = id.firstIndex(of: "/") {
-            return String(id[id.index(after: slash)...])
-        }
-        return id
-    }
 }
 
 public struct HFFileTreeItem: Codable, Hashable {
@@ -56,7 +49,6 @@ public final class HuggingFaceClient: NSObject, ObservableObject {
     @Published public var activeDownloads: [String: HFDownloadProgress] = [:]
 
     private var urlSession: URLSession!
-    private var downloadTasks: [URL: URLSessionDownloadTask] = [:]
 
     public override init() {
         super.init()

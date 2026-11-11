@@ -16,7 +16,7 @@ import mlx.core as mx
 import numpy as np
 from safetensors import safe_open
 
-from .model import SCORE_NAMES, SongBenchModel
+from .model import SCORE_NAMES
 
 FORMAT_VERSION = 1
 EVALUATOR_VERSION = "songbench-reference-cpu-v1"

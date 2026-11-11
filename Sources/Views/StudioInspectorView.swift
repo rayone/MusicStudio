@@ -53,7 +53,7 @@ public struct StudioInspectorView: View {
                 } else {
                     fallbackFromItem(item)
                 }
-                pluginSection(item)
+                pluginSection()
             }
             .padding(14)
         }
@@ -98,7 +98,7 @@ public struct StudioInspectorView: View {
                let img = NSImage(contentsOfFile: png) {
                 Image(nsImage: img)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .scaledToFit()
                     .frame(maxWidth: .infinity)
                     .cornerRadius(6)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
@@ -168,7 +168,7 @@ public struct StudioInspectorView: View {
 
     // MARK: - VST / AU Plugin
     @ViewBuilder
-    private func pluginSection(_ item: GenerationHistoryItem) -> some View {
+    private func pluginSection() -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text("EFFECT PLUGIN (VST3 / AU)")

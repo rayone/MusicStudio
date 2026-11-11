@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 from collections import deque
 from collections.abc import Callable
+from typing import Any
 import json
 import math
 import os
@@ -1068,6 +1069,21 @@ def find_weights_path(weights_rel: str) -> Path | None:
                 return cand3
     return None
 
+def yue2_engine_available() -> bool:
+    """True when the bundled YuE2 engine (lyra.cli) is importable in this venv.
+
+    Uses find_spec so a leftover PEP 420 namespace directory (e.g. only
+    ``lyra/licenses`` on disk after a broken install) is not mistaken for a
+    working engine. A bare ``import lyra`` would succeed in that case while
+    ``import lyra.cli`` fails at generation time.
+    """
+    import importlib.util
+    try:
+        return importlib.util.find_spec("lyra.cli") is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
 def find_vae_path() -> Path | None:
     """Locate VAE directory for mlx-yue."""
     candidates = [
@@ -1079,9 +1095,7 @@ def find_vae_path() -> Path | None:
         candidates.append(root / "YuE2-Vae")
     hf_cache = Path.home() / ".cache/huggingface/hub/models--m-a-p--YuE2-Vae/snapshots"
     if hf_cache.exists():
-        for snap in hf_cache.iterdir():
-            if snap.is_dir():
-                candidates.append(snap)
+        candidates.extend(snap for snap in hf_cache.iterdir() if snap.is_dir())
     for c in candidates:
         if (c / "config.json").exists() and ((c / "model.safetensors").exists() or (c / "vae.safetensors").exists()):
             return c
@@ -1179,12 +1193,7 @@ def seed_models(con: sqlite3.Connection) -> None:
         available = False
         reason = None
 
-        have_lyra = False
-        try:
-            import lyra
-            have_lyra = True
-        except ImportError:
-            pass
+        have_lyra = yue2_engine_available()
 
         if not found_path:
             reason = f"Weights not found (checked ~/.MusicStudio/models/{rel_path})"
@@ -1312,7 +1321,8 @@ def render_for_model(con: sqlite3.Connection, prompt_id: int, model_id: str) -> 
 
             # 2. Genre / subgenre
             genres = []
-            if p["genre"]: genres.append(p["genre"].lower())
+            if p["genre"]:
+                genres.append(p["genre"].lower())
             if p["subgenre"] and p["subgenre"].lower() != (p["genre"] or "").lower():
                 genres.append(p["subgenre"].lower())
             if genres:
@@ -2044,8 +2054,8 @@ def apply_mastering_chain(
 def _wav_to_mp3(wav_path: str, mp3_path: str, bitrate_kbps: int = 320) -> str:
     try:
         import lameenc
-    except ImportError:
-        raise RuntimeError("lameenc is not installed in venv")
+    except ImportError as err:
+        raise RuntimeError("lameenc is not installed in venv") from err
 
     with wave.open(wav_path, "rb") as wf:
         n_channels = wf.getnchannels()
@@ -2107,8 +2117,10 @@ def convert_audio(input_file: str, target_format: str, output_file: str | None =
                 try:
                     _wav_to_mp3(tmp_wav, dst, bitrate_kbps=320)
                 finally:
-                    try: os.unlink(tmp_wav)
-                    except Exception: pass
+                    try:
+                        os.unlink(tmp_wav)
+                    except Exception:
+                        pass
             else:
                 _wav_to_mp3(src, dst, bitrate_kbps=320)
         elif fmt == "m4a":
@@ -2294,12 +2306,7 @@ def generate_one(
         style_text = caption_to_style(caption)
         lyr_text = lyrics.strip() if lyrics and lyrics.strip() else "[Instrumental]"
 
-        have_lyra = False
-        try:
-            import lyra
-            have_lyra = True
-        except ImportError:
-            pass
+        have_lyra = yue2_engine_available()
 
         if have_lyra and ((Path(model_path) / "conversion.json").exists() or "vanch007" in model_id):
             vae_path = find_vae_path()
@@ -3198,8 +3205,6 @@ def cmd_worker(args: argparse.Namespace) -> int:
             con.commit()
             emit("error", message=f"Job {row['id']} failed: {e}")
 
-    return 0
-
 def cmd_convert(args: argparse.Namespace) -> int:
     # --tags-from lets an export (e.g. a plugin render in a temp WAV) inherit the
     # original track's metadata instead of the untagged intermediate's.
@@ -3274,7 +3279,8 @@ def render_spectrogram(audio_path: Path, out_png: Path, *, width: int = 900, hei
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import librosa, librosa.display
+    import librosa
+    import librosa.display
     import numpy as np
 
     y, sr = librosa.load(str(audio_path), sr=22050, mono=True)
@@ -3290,8 +3296,10 @@ def render_spectrogram(audio_path: Path, out_png: Path, *, width: int = 900, hei
     for spine in ax.spines.values():
         spine.set_color("#565f89")
     ax.tick_params(colors="#a9b1d6", labelsize=7)
-    ax.xaxis.label.set_color("#a9b1d6"); ax.yaxis.label.set_color("#a9b1d6")
-    ax.xaxis.label.set_size(8); ax.yaxis.label.set_size(8)
+    ax.xaxis.label.set_color("#a9b1d6")
+    ax.yaxis.label.set_color("#a9b1d6")
+    ax.xaxis.label.set_size(8)
+    ax.yaxis.label.set_size(8)
     fig.tight_layout(pad=0.4)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(out_png), facecolor=fig.get_facecolor())
@@ -3440,7 +3448,7 @@ def _param_steps(param, units, choice: bool = False, max_steps: int = 201) -> li
     original = getattr(param, "raw_value", None)
     steps = []
     try:
-        for start, end, v in spans:
+        for start, _end, v in spans:
             label = None
             # Choices: the declared table value ("Off", "Gemini") is authoritative; some
             # plugins (e.g. Wider) report stale display text right after a raw change.
@@ -3663,8 +3671,10 @@ def cmd_master(args: argparse.Namespace) -> int:
         return 1
     finally:
         if tmp_decoded is not None and tmp_decoded.exists():
-            try: tmp_decoded.unlink()
-            except Exception: pass
+            try:
+                tmp_decoded.unlink()
+            except Exception:
+                pass
 
     # Re-encode the mastered WAV back to the source format so it drops into the same player.
     final_output = str(mastered_wav)
@@ -3673,8 +3683,10 @@ def cmd_master(args: argparse.Namespace) -> int:
         conv = convert_audio(str(mastered_wav), src_ext, str(mastered_encoded))
         if conv.get("status") == "ok":
             final_output = conv["path"]
-            try: mastered_wav.unlink()
-            except Exception: pass
+            try:
+                mastered_wav.unlink()
+            except Exception:
+                pass
         else:
             emit("log", component="mastering", level="warn",
                  message=f"Re-encode to {src_ext} failed ({conv.get('error')}); keeping WAV")

@@ -4,6 +4,13 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 
 ## [Unreleased]
 
+### Fixed
+- Songwriter import window no longer closes when expanding a song's takes. It is now a sheet that stays open until closed with its dedicated close button (or Escape).
+
+### Changed
+- Songs with multiple takes are expanded by default in the Songwriter window, and each take row shows its own metadata (BPM, key, meter, type, length, ABC) instead of the newest take's.
+- The take expand/collapse control is now a larger, clearly defined filled-chevron button.
+
 ## [0.1.0] - 2026-10-06
 
 ### Added

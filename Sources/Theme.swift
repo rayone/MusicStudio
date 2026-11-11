@@ -25,7 +25,6 @@ public enum Theme {
 
     // Typography
     public static let body = Font.system(size: 13)
-    public static let bodyMedium = Font.system(size: 13, weight: .medium)
     public static let bodyBold = Font.system(size: 13, weight: .semibold)
     public static let small = Font.system(size: 11)
     public static let smallMedium = Font.system(size: 11, weight: .medium)

@@ -82,7 +82,6 @@ public class DB {
         queue.sync { _fetchGenerations(limit: limit) }
     }
     public func pendingJobCount() -> Int { queue.sync { _pendingJobCount() } }
-    public func fetchModels() -> [ModelRow] { queue.sync { _fetchModels() } }
     public func fetchQueueJobs() -> [QueueJobItem] { queue.sync { _fetchQueueJobs() } }
     public func cancelJob(id: Int) { queue.sync { _cancelJob(id: id) } }
     public func dismissFailedJobs() { queue.sync { _dismissFailedJobs() } }
@@ -140,12 +139,6 @@ public class DB {
     }
     public func fetchLyrics(forPromptId pid: String? = nil) -> [LyricSet] {
         queue.sync { _fetchLyrics(forPromptId: pid) }
-    }
-    public func saveLyricSet(title: String, body: String, structure: String = "", promptId: String? = nil) -> Int {
-        queue.sync { _saveLyricSet(title: title, body: body, structure: structure, promptId: promptId) }
-    }
-    public func deleteLyricSet(id: Int) {
-        queue.sync { _deleteLyricSet(id: id) }
     }
 
     /// FTS5-backed keyword search over prompts_fts (BM25 ranked). Returns prompt ids
@@ -608,31 +601,6 @@ public class DB {
         return count
     }
 
-    private func _fetchModels() -> [ModelRow] {
-        var rows = [ModelRow]()
-        let query = "SELECT id, name, family, backend, weights_path, available, unavailable_reason FROM models ORDER BY sort_order ASC, name ASC"
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK {
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                func text(_ i: Int32) -> String {
-                    guard let p = sqlite3_column_text(stmt, i) else { return "" }
-                    return String(cString: p)
-                }
-                rows.append(ModelRow(
-                    id: text(0),
-                    name: text(1),
-                    family: text(2),
-                    backend: text(3),
-                    weightsPath: text(4),
-                    available: sqlite3_column_int(stmt, 5) == 1,
-                    reason: text(6)
-                ))
-            }
-        }
-        sqlite3_finalize(stmt)
-        return rows
-    }
-
     private func _fetchQueueJobs() -> [QueueJobItem] {
         var jobs = [QueueJobItem]()
         let q = """
@@ -779,45 +747,6 @@ public class DB {
         return results
     }
 
-    private func _saveLyricSet(title: String, body: String, structure: String, promptId: String?) -> Int {
-        var stmt: OpaquePointer?
-        let now = Date().timeIntervalSince1970
-        let ins = "INSERT INTO lyrics (title, structure, body, language, genre_affinity, is_user, created_at, updated_at) VALUES (?, ?, ?, 'english', '', 1, ?, ?)"
-        var newId = 0
-        if sqlite3_prepare_v2(db, ins, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, (title as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, (structure as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 3, (body as NSString).utf8String, -1, nil)
-            sqlite3_bind_double(stmt, 4, now)
-            sqlite3_bind_double(stmt, 5, now)
-            if sqlite3_step(stmt) == SQLITE_DONE {
-                newId = Int(sqlite3_last_insert_rowid(db))
-            }
-        }
-        sqlite3_finalize(stmt)
-
-        if newId > 0, let pStr = promptId, let pid = Int(pStr) {
-            var linkStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO prompt_lyrics (prompt_id, lyric_id) VALUES (?, ?)", -1, &linkStmt, nil) == SQLITE_OK {
-                sqlite3_bind_int(linkStmt, 1, Int32(pid))
-                sqlite3_bind_int(linkStmt, 2, Int32(newId))
-                sqlite3_step(linkStmt)
-            }
-            sqlite3_finalize(linkStmt)
-        }
-        logDb(.info, "Saved user lyric set #\(newId)", "title=\(title)")
-        return newId
-    }
-
-    private func _deleteLyricSet(id: Int) {
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM lyrics WHERE id = ?", -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int(stmt, 1, Int32(id))
-            sqlite3_step(stmt)
-        }
-        sqlite3_finalize(stmt)
-        logDb(.info, "Deleted lyric set #\(id)", "id=\(id)")
-    }
     private func _saveTemplate(
         title: String,
         genre: String,

@@ -3,9 +3,15 @@ import AppKit
 
 public struct AudioPlayerBarView: View {
     @ObservedObject var vm: StudioViewModel
+    @ObservedObject private var net: NetAudioController
+    @State private var castExpanded = false
+    // Seek drag state: show the target position while dragging, commit on release.
+    @State private var seekDragging = false
+    @State private var seekTarget: Double = 0
 
     public init(vm: StudioViewModel) {
         self.vm = vm
+        self._net = ObservedObject(wrappedValue: vm.netAudio)
     }
 
     /// Player-bar label. VST3 previews play from a temp file, so show the track and
@@ -21,7 +27,133 @@ public struct AudioPlayerBarView: View {
     }
 
     public var body: some View {
+        VStack(spacing: 0) {
+            if vm.isCasting {
+                castingBanner
+            }
+            playerRow
+        }
+        .background(Theme.bgFloat)
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+            vm.isCasting ? Theme.green.opacity(0.5) : Theme.border, lineWidth: 1))
+    }
+
+    // MARK: - Casting banner (point 5)
+
+    private var castingBanner: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { castExpanded.toggle() } }) {
+                HStack(spacing: 8) {
+                    Image(systemName: castStateIcon)
+                        .font(.system(size: 12))
+                        .foregroundColor(castStateColor)
+                    Text(castHeadline)
+                        .font(Theme.smallBold)
+                        .foregroundColor(Theme.fg)
+                        .lineLimit(1)
+                    if let proto = net.activeProtocolLabel {
+                        Text(proto.uppercased())
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(castStateColor)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(castStateColor.opacity(0.15))
+                            .cornerRadius(3)
+                    }
+                    Spacer()
+                    if net.state == .connecting || net.state == .reconnecting {
+                        ProgressView().controlSize(.small)
+                    }
+                    Image(systemName: castExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.comment)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if castExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    castDetailRow("Receiver", net.activeReceiverName ?? "—")
+                    if let model = net.activeReceiverModel, !model.isEmpty {
+                        castDetailRow("Model", model)
+                    }
+                    castDetailRow("Protocol", net.activeProtocolLabel ?? "—")
+                    if let host = net.activeHost { castDetailRow("Address", host) }
+                    if !net.castingTitle.isEmpty { castDetailRow("Track", net.castingTitle) }
+                    castDetailRow("Status", net.statusDetail.isEmpty ? net.state.rawValue : net.statusDetail)
+                    if net.state == .streaming || net.state == .reconnecting {
+                        HStack(spacing: 8) {
+                            Text("Volume").font(.system(size: 10)).foregroundColor(Theme.comment)
+                                .frame(width: 64, alignment: .leading)
+                            Image(systemName: "speaker.fill").font(.system(size: 9)).foregroundColor(Theme.comment)
+                            Slider(value: Binding(get: { net.activeVolume },
+                                                  set: { vm.netAudio.setVolume($0) }), in: 0...1)
+                                .tint(Theme.green)
+                            Text("\(Int(net.activeVolume * 100))%")
+                                .font(Theme.mono).foregroundColor(Theme.comment)
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                    }
+                    Button(action: { vm.stopCasting() }) {
+                        Text("Stop casting · play locally")
+                            .font(Theme.small).foregroundColor(Theme.red)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
+                .padding(.top, 6)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(castStateColor.opacity(0.06))
+    }
+
+    private func castDetailRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.system(size: 10)).foregroundColor(Theme.comment)
+                .frame(width: 64, alignment: .leading)
+            Text(value).font(Theme.mono).foregroundColor(Theme.fg).lineLimit(1)
+            Spacer()
+        }
+    }
+
+    private var castHeadline: String {
+        switch net.state {
+        case .streaming: return "Casting to \(net.activeReceiverName ?? "receiver")"
+        case .connecting: return "Connecting to \(net.activeReceiverName ?? "receiver")…"
+        case .reconnecting: return "Reconnecting to \(net.activeReceiverName ?? "receiver")…"
+        case .error: return "Casting error"
+        default: return "Network output"
+        }
+    }
+
+    private var castStateIcon: String {
+        net.state == .error ? "exclamationmark.triangle.fill" : "airplayaudio"
+    }
+
+    private var castStateColor: Color {
+        switch net.state {
+        case .streaming: return Theme.green
+        case .connecting, .reconnecting: return Theme.yellow
+        case .error: return Theme.red
+        default: return Theme.comment
+        }
+    }
+
+    private var playerRow: some View {
         HStack(spacing: 12) {
+            Button(action: { vm.previousTrack() }) {
+                Image(systemName: "backward.fill")
+                    .font(Theme.small)
+                    .foregroundColor(vm.history.isEmpty ? Theme.comment : Theme.fg)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.history.isEmpty)
+            .help("Previous track")
+
             Button(action: {
                 vm.togglePlayPause()
             }) {
@@ -35,24 +167,56 @@ public struct AudioPlayerBarView: View {
             .buttonStyle(.plain)
             .disabled(vm.currentPlayingFile == nil && vm.history.isEmpty)
 
+            Button(action: { vm.nextTrack() }) {
+                Image(systemName: "forward.fill")
+                    .font(Theme.small)
+                    .foregroundColor(vm.history.isEmpty ? Theme.comment : Theme.fg)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.history.isEmpty)
+            .help("Next track")
+
+            // Plugin bypass toggle, visible only when a live plugin is loaded. Flips
+            // processing on/off mid-track without disturbing the playhead or a cast
+            // session.
+            if vm.pluginLiveActive {
+                Button(action: { vm.toggleEffectBypass() }) {
+                    Image(systemName: vm.effectBypassed ? "powerplug" : "powerplug.fill")
+                        .font(Theme.small)
+                        .foregroundColor(vm.effectBypassed ? Theme.comment : Theme.purple)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help(vm.effectBypassed ? "Effect bypassed — click to enable"
+                                        : "Effect active — click to bypass")
+            }
+
             Text(playingLabel)
                 .font(Theme.smallMedium)
                 .foregroundColor(vm.currentPlayingFile == nil ? Theme.comment : Theme.fg)
                 .lineLimit(1)
-                .frame(maxWidth: 220, alignment: .leading)
+                .frame(maxWidth: 180, alignment: .leading)
 
-            Text(formatTime(vm.audioProgress))
+            Text(formatTime(seekDragging ? seekTarget : vm.audioProgress))
                 .font(Theme.mono)
-                .foregroundColor(Theme.comment)
+                .foregroundColor(seekDragging ? Theme.yellow : Theme.comment)
 
             Slider(
-                value: $vm.audioProgress,
+                value: Binding(
+                    get: { seekDragging ? seekTarget : vm.audioProgress },
+                    set: { seekTarget = $0 }
+                ),
                 in: 0...max(vm.audioDuration, 1.0),
                 onEditingChanged: { editing in
                     if editing {
+                        seekDragging = true
+                        seekTarget = vm.audioProgress
                         vm.beginSeek()
                     } else {
-                        vm.endSeek(to: vm.audioProgress)
+                        // Commit exactly one seek on release.
+                        seekDragging = false
+                        vm.endSeek(to: seekTarget)
                     }
                 }
             )
@@ -86,12 +250,11 @@ public struct AudioPlayerBarView: View {
             }
             .buttonStyle(.plain)
             .help("Open Output Folder")
+
+            CastButton(vm: vm)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Theme.bgFloat)
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
     }
 
     private func formatTime(_ sec: Double) -> String {
