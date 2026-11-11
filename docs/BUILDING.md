@@ -28,7 +28,7 @@ MusicStudio has no Xcode project. `build.command` compiles every Swift file in `
 1. Compiles `Sources/**/*.swift` with `swiftc -parse-as-library -O` into a single arm64 binary.
 2. Recreates `MusicStudio.app` from scratch, so stale files never linger.
 3. Copies `Resources/` into `Contents/Resources/`, **excluding** `backups/` (local database backups contain personal history), `__pycache__/`, `*.pyc` and `.DS_Store`.
-4. Writes `Info.plist` with the version, bundle id `ai.opencode.mlx.musicstudio`, icon, minimum macOS 14 and the local-network usage string.
+4. Writes `Info.plist` with the marketing version (`CFBundleShortVersionString`), an advancing integer build number (`CFBundleVersion`), the source revision (custom `SCMRevision` key: git short SHA, `-dirty` when the tree is uncommitted), bundle id `ai.opencode.mlx.musicstudio`, icon, minimum macOS 14 and the local-network usage string.
 5. Copies `bin/uv` into `Contents/Resources/bin/uv`.
 6. Signs the bundle (see below) and runs `codesign --verify --deep --strict`.
 7. With `--release`, stages the app and an `/Applications` symlink into a compressed UDZO `.dmg` via `hdiutil`, signs/notarizes it if configured, and writes a SHA-256 checksum.
@@ -37,7 +37,8 @@ MusicStudio has no Xcode project. `build.command` compiles every Swift file in `
 
 | Variable | Default | Effect |
 |---|---|---|
-| `VERSION` | `0.1.0` | `CFBundleShortVersionString`, `CFBundleVersion`, and the DMG name |
+| `VERSION` | `0.1.0` | Marketing version: `CFBundleShortVersionString` and the DMG name |
+| `BUILD` | auto-incrementing counter in `.build-number` | `CFBundleVersion`, the build number. Apple requires 1–3 period-separated integers, so this is a plain integer that advances by one on every build. |
 | `CODESIGN_IDENTITY` | *(unset → ad-hoc)* | Sign with this identity under the hardened runtime |
 | `NOTARY_PROFILE` | *(unset)* | `notarytool` keychain profile. Notarizes and staples the release. Requires `CODESIGN_IDENTITY`. |
 
@@ -126,3 +127,5 @@ sips -s format png -z 256 256 Resources/AppIcon.icns --out docs/images/icon.png
 ## Continuous integration
 
 `.github/workflows/build.yml` compiles the app on a macOS arm64 runner for every push and pull request. It checks that the Swift sources build and the bundle assembles. It doesn't install the Python engine or run models, because GitHub runners lack the RAM and GPU those need.
+
+On CI the `.build-number` counter starts fresh each run (the runner has no prior state), so set `BUILD` explicitly — e.g. `BUILD=${{ github.run_number }}` — for a monotonic build number across CI builds. The `SCMRevision` key records the commit regardless; a shallow `actions/checkout` still yields the correct short SHA, marked `-dirty` only if CI modifies the tree before building.

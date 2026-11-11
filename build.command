@@ -16,7 +16,10 @@
 #   ./build.command --release    Also package dist/MusicStudio-<version>.zip
 #
 # Release environment (optional):
-#   VERSION=0.1.0                     Override the bundle version
+#   VERSION=0.1.0                     Override the marketing version (CFBundleShortVersionString)
+#   BUILD=42                          Override the build number (CFBundleVersion); must be
+#                                     1–3 period-separated integers. Defaults to an
+#                                     auto-incrementing counter in .build-number.
 #   CODESIGN_IDENTITY="Developer ID Application: …"
 #                                     Sign with hardened runtime instead of ad-hoc
 #   NOTARY_PROFILE=<keychain-profile> Notarize + staple the zip (needs CODESIGN_IDENTITY;
@@ -34,6 +37,32 @@ NC='\033[0m'
 APP_NAME="MusicStudio.app"
 BIN_NAME="MusicStudio"
 VERSION="${VERSION:-0.1.0}"
+
+# Build number (CFBundleVersion): a strictly increasing integer that advances on EVERY
+# build. Apple requires CFBundleVersion to be 1–3 period-separated integers, so no SHA or
+# dirty flag may appear here. The counter persists in .build-number (gitignored); export
+# BUILD to override (e.g. CI may set it from the run number).
+BUILD_COUNTER_FILE=".build-number"
+if [ -z "${BUILD:-}" ]; then
+    _prev=0
+    if [ -f "$BUILD_COUNTER_FILE" ]; then
+        _prev=$(tr -cd '0-9' < "$BUILD_COUNTER_FILE")
+        [ -z "$_prev" ] && _prev=0
+    fi
+    BUILD=$((_prev + 1))
+    printf '%s\n' "$BUILD" > "$BUILD_COUNTER_FILE"
+fi
+
+# Source provenance (CFBundleVersion cannot hold it): git short SHA plus a dirty flag when
+# the working tree has uncommitted changes, or "nogit" outside a checkout. Stamped into the
+# custom SCMRevision Info.plist key so a build is traceable to exact source.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    _sha=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+    [ -n "$(git status --porcelain 2>/dev/null)" ] && _sha="${_sha}-dirty"
+    SCM_REVISION="$_sha"
+else
+    SCM_REVISION="nogit"
+fi
 RELEASE=0
 [ "${1:-}" = "--release" ] && RELEASE=1
 
@@ -42,7 +71,7 @@ if [ -n "${NOTARY_PROFILE:-}" ] && [ -z "${CODESIGN_IDENTITY:-}" ]; then
     exit 1
 fi
 
-echo -e "${BLUE}==> Compiling MusicStudio ${VERSION} macOS App...${NC}"
+echo -e "${BLUE}==> Compiling MusicStudio ${VERSION} (build ${BUILD}, rev ${SCM_REVISION}) macOS App...${NC}"
 
 # Find all Swift source files
 SWIFT_FILES=$(find Sources -name "*.swift")
@@ -81,13 +110,15 @@ cat << EOF > "$APP_NAME/Contents/Info.plist"
     <key>CFBundleShortVersionString</key>
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
+    <string>${BUILD}</string>
+    <key>SCMRevision</key>
+    <string>${SCM_REVISION}</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.music</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 MusicStudio</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>MusicStudio connects to the Songwriter API you configure to import songs and report evaluation metadata.</string>
+    <string>MusicStudio connects to the Songwriter API you configure and discovers AirPlay, DLNA, HEOS, and Google Cast audio receivers on your local network to stream playback to them.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
@@ -137,7 +168,7 @@ else
 fi
 codesign --verify --deep --strict "$APP_NAME"
 
-echo -e "${GREEN}==> Build complete: ${APP_NAME} (v${VERSION})${NC}"
+echo -e "${GREEN}==> Build complete: ${APP_NAME} (v${VERSION} build ${BUILD}, rev ${SCM_REVISION})${NC}"
 
 if [ "$RELEASE" -eq 1 ]; then
     mkdir -p dist

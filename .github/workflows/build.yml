@@ -21,19 +21,25 @@ jobs:
           swiftc --version
 
       - name: Build MusicStudio.app
+        env:
+          BUILD: ${{ github.run_number }}
         run: ./build.command --release
 
       - name: Verify bundle
         run: |
           codesign --verify --deep --strict MusicStudio.app
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' MusicStudio.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' MusicStudio.app/Contents/Info.plist
           test -x MusicStudio.app/Contents/Resources/bin/uv
           test -f MusicStudio.app/Contents/Resources/studio.py
           test -f MusicStudio.app/Contents/Resources/engine-requirements.txt
           test ! -e MusicStudio.app/Contents/Resources/backups
 
       - name: Python engine syntax check
-        run: python3 -m py_compile Resources/studio.py Resources/songbench/*.py
+        run: python3 -m py_compile Resources/studio.py Resources/netaudio.py Resources/songbench/*.py
+
+      - name: Python unit tests
+        run: python3 -m unittest discover -s tests -p "test_*.py"
 
       - uses: actions/upload-artifact@v4
         with:
