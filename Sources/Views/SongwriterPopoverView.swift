@@ -87,7 +87,7 @@ public struct SongwriterPopoverView: View {
             footer
         }
         .padding(16)
-        .frame(width: 1040, height: 600, alignment: .topLeading)
+        .frame(width: 1060, height: 600, alignment: .topLeading)
         .background(Theme.bgFloat)
         .onAppear {
             if vm.isSongwriterEnabled {
