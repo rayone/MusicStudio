@@ -11,10 +11,9 @@ public struct SongwriterPopoverView: View {
         case timestamp, title, genre, bpm, key, meter, type, duration, abc
     }
 
-    /// Every take the API returned, one row each. With `all_revisions=true` the server
-    /// returns one summary per take — each with its own `take_id` and metadata — so the
-    /// client lists them flat; no grouping, expansion, or metadata reconstruction. A take's
-    /// display title is "<title> (Take <revision>)".
+    /// Every song the API returned, one row each (the current take of each song). Takes of
+    /// one song share a server-assigned `take_group`; standalone songs are a group of one.
+    /// Rows are labelled "<title> (Take N of M)" when M > 1.
     private var takes: [SongwriterSongSummary] {
         let filtered = query.isEmpty ? vm.songwriterSongs : vm.songwriterSongs.filter {
             $0.title.localizedCaseInsensitiveContains(query) ||
@@ -60,6 +59,26 @@ public struct SongwriterPopoverView: View {
         }
     }
 
+    /// All takes that share a song's `take_group`, newest-first.
+    private func groupTakes(_ s: SongwriterSongSummary) -> [SongwriterSongSummary] {
+        vm.songwriterSongs
+            .filter { $0.takeGroup == s.takeGroup }
+            .sorted { $0.takeNumber > $1.takeNumber }
+    }
+
+    /// Queue every listed song in one action (each row, whatever its group).
+    private func queueAllListed() {
+        let items = takes.map { (id: $0.id, revision: $0.revision, title: $0.title) }
+        vm.queueSongs(items, label: "all \(items.count) listed")
+    }
+
+    /// Queue every take of the given row's song (its whole take_group).
+    private func queueAllTakes(of s: SongwriterSongSummary) {
+        let group = groupTakes(s)
+        let items = (group.isEmpty ? [s] : group).map { (id: $0.id, revision: $0.revision, title: $0.title) }
+        vm.queueSongs(items, label: "\(items.count) takes of \(s.title)")
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -68,7 +87,7 @@ public struct SongwriterPopoverView: View {
             footer
         }
         .padding(16)
-        .frame(width: 900, height: 600, alignment: .topLeading)
+        .frame(width: 1040, height: 600, alignment: .topLeading)
         .background(Theme.bgFloat)
         .onAppear {
             if vm.isSongwriterEnabled {
@@ -89,6 +108,21 @@ public struct SongwriterPopoverView: View {
             }
 
             Spacer()
+
+            if !takes.isEmpty {
+                Button(action: { queueAllListed() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.badge.plus").font(.system(size: 11))
+                        Text("Queue all \(takes.count)").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(Theme.green)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Theme.green.opacity(0.16)).cornerRadius(5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Queue every song currently listed (\(takes.count))")
+            }
 
             Button(action: { vm.loadSongwriterSongs(allRevisions: true) }) {
                 if vm.isLoadingSongwriter {
@@ -201,15 +235,15 @@ public struct SongwriterPopoverView: View {
 
     // Column widths shared by the header and rows so everything lines up.
     private enum Col {
-        static let crafted: CGFloat = 108
-        static let title: CGFloat = 195
-        static let genre: CGFloat = 78
-        static let bpm: CGFloat = 40
-        static let key: CGFloat = 50
-        static let meter: CGFloat = 40
-        static let type: CGFloat = 52
-        static let length: CGFloat = 44
-        static let abc: CGFloat = 36
+        static let crafted: CGFloat = 120
+        static let title: CGFloat = 230
+        static let genre: CGFloat = 110
+        static let bpm: CGFloat = 44
+        static let key: CGFloat = 56
+        static let meter: CGFloat = 46
+        static let type: CGFloat = 56
+        static let length: CGFloat = 50
+        static let abc: CGFloat = 40
         static let queue: CGFloat = 240
     }
 
@@ -266,14 +300,15 @@ public struct SongwriterPopoverView: View {
             }
             .frame(width: Col.crafted, alignment: .leading)
 
-            // "<title> (Take N)" + brief, so each row says exactly which song and take it is.
+            // "<title> (Take N of M)" when the song has multiple takes; just the title
+            // otherwise. Take number/count come from the server's take_group.
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text("\(take.title) (Take \(take.revision))")
+                    Text(take.takeCount > 1 ? "\(take.title) (Take \(take.takeNumber) of \(take.takeCount))" : take.title)
                         .font(Theme.smallMedium)
                         .foregroundColor(Theme.fg)
                         .lineLimit(1)
-                    if take.available_revisions.map({ take.revision == ($0.max() ?? take.revision) }) ?? false {
+                    if take.takeCount > 1 && take.takeNumber == take.takeCount {
                         Text("latest")
                             .font(.system(size: 9, weight: .semibold)).foregroundColor(Theme.green)
                     }
@@ -345,17 +380,15 @@ public struct SongwriterPopoverView: View {
             }
             .frame(width: Col.abc, alignment: .center)
 
-            // Per-take actions. Each row's `available_revisions` carries the song's full
-            // take set, so "Queue all N" queues every take of this song in one click
-            // (restoring the single-click bulk queue). "Queue" queues just this take;
-            // "Load" imports this take into the editor.
-            let allTakes = take.allRevisions
+            // Per-row actions. take_count comes from the song's take_group, so "Queue all
+            // N takes" queues every take of this song in one click; "Queue take" queues
+            // just this one; "Load" imports it into the editor.
             HStack(spacing: 6) {
-                if allTakes.count > 1 {
-                    Button(action: { vm.queueAllTakes(songId: take.id, title: take.title, takes: allTakes) }) {
+                if take.takeCount > 1 {
+                    Button(action: { queueAllTakes(of: take) }) {
                         HStack(spacing: 3) {
                             Image(systemName: "text.badge.plus").font(.system(size: 9))
-                            Text("Queue all \(allTakes.count)").font(.system(size: 10, weight: .semibold))
+                            Text("Queue all \(take.takeCount)").font(.system(size: 10, weight: .semibold))
                         }
                         .foregroundColor(Theme.green)
                         .padding(.horizontal, 7).padding(.vertical, 3)
@@ -363,18 +396,18 @@ public struct SongwriterPopoverView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Queue all \(allTakes.count) takes of \(take.title)")
+                    .help("Queue all \(take.takeCount) takes of \(take.title)")
                 }
 
-                Button(action: { vm.queueAllTakes(songId: take.id, title: take.title, takes: [take.revision]) }) {
-                    Text("Queue take").font(.system(size: 10, weight: .semibold))
+                Button(action: { vm.queueSongs([(id: take.id, revision: take.revision, title: take.title)], label: take.title) }) {
+                    Text(take.takeCount > 1 ? "Queue take" : "Queue").font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Theme.green)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Theme.green.opacity(0.10)).cornerRadius(4)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Queue only Take \(take.revision) of \(take.title)")
+                .help(take.takeCount > 1 ? "Queue only Take \(take.takeNumber) of \(take.title)" : "Queue \(take.title)")
 
                 Button(action: { vm.importSongwriterSong(take, revision: take.revision) }) {
                     Text("Load").font(.system(size: 10, weight: .semibold))
@@ -384,7 +417,7 @@ public struct SongwriterPopoverView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Import Take \(take.revision) into the editor")
+                .help("Import \(take.title) into the editor")
             }
             .frame(width: Col.queue, alignment: .trailing)
         }

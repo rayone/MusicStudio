@@ -1,7 +1,7 @@
 # MusicStudio–Songwriter API Contract
 
-Contract-Version: 4
-Updated-At: 2026-11-11T08:42:54Z
+Contract-Version: 5
+Updated-At: 2026-11-11T12:50:34Z
 Status: Confirmed & Implemented
 Updated-By: Songwriter & MusicStudio Collaboration
 
@@ -43,15 +43,25 @@ In local development, any non-empty token is accepted when `SONGWRITER_API_KEY` 
 ## 1. List available songs
 
 ```http
-GET /v1/songs?status=ready&limit=50&cursor=<optional>&all_revisions=<bool>
+GET /v1/songs?status=ready&limit=50&cursor=<optional>
 Authorization: Bearer <token>
 Accept: application/json
 ```
 
-`all_revisions` (default `false`):
+Returns one row per song (the current take of each). A **song** is a creative work; a
+**take** is one generated version of it. Takes of the same song are distinct records that
+share a `take_group`:
 
-- `false` — one row per song: the latest take. `available_revisions` lists every take newest-first; `take_id`/`revision` identify that latest take.
-- `true` — **one row per take** (flat; no nesting). Each row carries that take's own metadata and a `take_id` unique across the whole response. MusicStudio renders these directly as separate list entries titled `"<title> (Take <revision>)"`.
+- `take_group` — stable id shared by every take of one song (the first take's id).
+- `take_number` — 1..N, this take's position within its group.
+- `take_count` — number of takes in the group.
+- A standalone song is a group of one: `take_group == id`, `take_number == 1`, `take_count == 1`.
+- `take_id` (`"<id>:<revision>"`) stays a stable per-row identity for the client's list.
+
+MusicStudio groups rows by `take_group`, labels them `"<title> (Take <take_number> of
+<take_count>)"`, and offers "Queue all N takes" (one group) and "Queue all songs" (the list).
+The `all_revisions` query parameter is deprecated and ignored (takes are grouped via
+`take_group`, not DB revisions).
 
 Response:
 
@@ -62,7 +72,9 @@ Response:
       "id": "song_test_01",
       "revision": 1,
       "take_id": "song_test_01:1",
-      "available_revisions": [1],
+      "take_group": "song_test_01",
+      "take_number": 1,
+      "take_count": 3,
       "title": "Neon Horizon",
       "summary": "Story about cybernetic neon nights",
       "genre": "Synth-pop",
@@ -83,8 +95,6 @@ Response:
 ```
 
 MusicStudio presents these songs in a searchable popover. Selecting a row fetches its details but does not start generation.
-
-## 2. Get selected song details
 
 ```http
 GET /v1/songs/{song_id}

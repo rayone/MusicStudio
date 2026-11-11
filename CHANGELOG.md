@@ -4,6 +4,19 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-11
+
+### Changed
+- Songwriter and MusicStudio now share one vocabulary: a **song** is a creative work, a **take** is one generated version of it. Takes of a song are grouped by a server-assigned `take_group`; the window labels rows "Title (Take N of M)" and no longer mislabels every take as "Take 1".
+- Songwriter persists `take_group`/`take_number` when a take is saved (and "+ New Take" stays within the song's group); the `/v1/songs` API exposes `take_group`, `take_number`, and `take_count`.
+
+### Added
+- "Queue all N takes" queues every take of one song in one click; a header "Queue all N" queues every listed song.
+
+### Fixed
+- Songwriter window no longer truncates columns or clips the row action buttons.
+- Retired the revision-based `all_revisions` listing path in favour of take grouping (the query flag is now ignored).
+
 ## [0.1.1] - 2026-11-11
 
 ### Fixed
@@ -41,5 +54,6 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 - First-run setup now installs the YuE2 engine (`mlx-yue`, pinned commit) from `Resources/engine-requirements.txt`. Previously it had to be installed by hand.
 - Local database backups are no longer copied into the app bundle.
 
+[0.1.2]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.2
 [0.1.1]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.1
 [0.1.0]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.0

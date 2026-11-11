@@ -99,9 +99,9 @@ public final class SongwriterAPI {
             URLQueryItem(name: "status", value: "ready"),
             URLQueryItem(name: "limit", value: "100")
         ]
-        if allRevisions {
-            query.append(URLQueryItem(name: "all_revisions", value: "true"))
-        }
+        // Takes are grouped server-side via take_group; the old all_revisions flag is a
+        // no-op and no longer sent.
+        _ = allRevisions
         var summaries = try await get(
             "v1/songs",
             queryItems: query,

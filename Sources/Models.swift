@@ -275,21 +275,26 @@ public struct SongwriterSongSummary: Codable, Identifiable, Hashable {
     public let has_abc: Bool?
     public var created_at: String?
     public let updated_at: String
-    public var available_revisions: [Int]?
     public var take_id: String?
+    // Takes: a song is a creative work; a take is one generated version of it. take_group
+    // is shared by all takes of one song; take_number is 1..N; take_count is the group
+    // size. Standalone song = group of one (take_group == id, number 1, count 1).
+    public var take_group: String?
+    public var take_number: Int?
+    public var take_count: Int?
 
-    public var allRevisions: [Int] {
-        if let revs = available_revisions, !revs.isEmpty {
-            return revs
-        }
-        return Array((1...max(1, revision)).reversed())
-    }
-
-    /// Stable identity for one take. Prefers the server's `take_id` (contract v4), falling
-    /// back to `id:revision` for older responses.
+    /// Stable identity for one row. Prefers the server's `take_id`, falling back to
+    /// `id:revision` for responses without it.
     public var uniqueId: String {
         take_id ?? "\(id):\(revision)"
     }
+
+    /// The group this take belongs to; a standalone song is its own group.
+    public var takeGroup: String { take_group ?? id }
+    /// Number of takes in this song's group (at least 1).
+    public var takeCount: Int { max(1, take_count ?? 1) }
+    /// This take's position within its group (at least 1).
+    public var takeNumber: Int { max(1, take_number ?? 1) }
 }
 public struct SongwriterSongList: Codable {
     public let songs: [SongwriterSongSummary]

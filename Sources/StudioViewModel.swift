@@ -736,6 +736,88 @@ Sound of the future rolling through the land
         }
     }
 
+    /// Queue an arbitrary set of songs/takes identified by (song id, revision). Unlike
+    /// `queueAllTakes` (one song id, many revisions), this handles the real Songwriter
+    /// shape where each take is its own song record: "queue all songs in the list" and
+    /// "queue all same-titled takes" both pass their distinct ids here.
+    public func queueSongs(_ items: [(id: String, revision: Int, title: String)], label: String) {
+        guard !items.isEmpty else { return }
+
+        let runModel = selectedModel
+        let family = selectedModelFamily
+        let runDuration = duration
+        let runSteps = steps
+        let runGuidance = guidance
+        let runFormat = outputFormat.rawValue
+        let runCot = cotMode.rawValue
+        let usesAbc = usesAbcScore
+        let batchId = UUID().uuidString
+        let shouldStart = !isGenerating
+        if isQueuePaused { setQueuePaused(false) }
+
+        statusText = "Queuing \(items.count) song\(items.count == 1 ? "" : "s") (\(label))…"
+        appendLog(component: .queue, level: .info, message: "Queue songs requested",
+                  detail: "count=\(items.count) label=\(label)")
+
+        Task {
+            var queued = 0
+            var position = DB.shared?.nextQueuedPosition() ?? 1
+            for item in items {
+                do {
+                    let song = try await SongwriterAPI.shared.song(id: item.id, revision: item.revision)
+                    let input = family == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
+                    let takeCaption = input?.style ?? input?.caption ?? song.creative.caption
+                    let takeLyrics = input?.lyrics ?? song.creative.lyrics
+
+                    var paramsObj: [String: Any] = [
+                        "duration": runDuration,
+                        "steps": runSteps,
+                        "guidance": runGuidance,
+                        "format": runFormat,
+                        "cot": runCot,
+                        "songwriter_id": song.id,
+                        "songwriter_revision": song.revision,
+                        "songwriter_title": song.title
+                    ]
+
+                    if family == .yue2, usesAbc,
+                       let abc = input?.abc_score,
+                       !abc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let abcDir = homeDirectory.appendingPathComponent("queue-abc", isDirectory: true)
+                        let queuedAbc = abcDir.appendingPathComponent("score_\(UUID().uuidString).abc")
+                        try FileManager.default.createDirectory(at: abcDir, withIntermediateDirectories: true)
+                        try abc.write(to: queuedAbc, atomically: true, encoding: .utf8)
+                        paramsObj["abc_file"] = queuedAbc.path
+                    }
+
+                    let paramsJson = (try? String(data: JSONSerialization.data(withJSONObject: paramsObj), encoding: .utf8)) ?? "{}"
+                    let jobSeed = Int.random(in: 100_000...999_999_999)
+                    let jobId = DB.shared?.enqueueJob(
+                        batchId: batchId,
+                        modelId: runModel,
+                        caption: takeCaption,
+                        lyrics: takeLyrics,
+                        seed: jobSeed,
+                        params: paramsJson,
+                        position: position
+                    ) ?? -1
+                    position += 1
+                    if jobId > 0 { queued += 1 }
+                    appendLog(component: .queue, level: jobId > 0 ? .info : .error,
+                              message: "Queued \(item.title) (rev \(item.revision))",
+                              detail: "seed=\(jobSeed) id=\(jobId)")
+                } catch {
+                    appendLog(component: .queue, level: .error,
+                              message: "Failed to queue \(item.title) (rev \(item.revision))", detail: "error=\(error)")
+                }
+            }
+
+            self.refreshQueueDepth()
+            self.statusText = "Queued \(queued) of \(items.count) song\(items.count == 1 ? "" : "s") (\(label))"
+            if shouldStart { self.startWorkerIfNeeded() }
+        }
+    }
+
     // MARK: - Defaults & Layout Actions
     public func applyGenerationDefaultsToCurrentSession() {
         if !defaultModelId.isEmpty && (availableModels.contains(defaultModelId) || ModelCatalog.model(withId: defaultModelId) != nil) {

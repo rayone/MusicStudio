@@ -36,7 +36,7 @@ NC='\033[0m'
 
 APP_NAME="MusicStudio.app"
 BIN_NAME="MusicStudio"
-VERSION="${VERSION:-0.1.1}"
+VERSION="${VERSION:-0.1.2}"
 
 # Build number (CFBundleVersion): a strictly increasing integer that advances on EVERY
 # build. Apple requires CFBundleVersion to be 1–3 period-separated integers, so no SHA or
