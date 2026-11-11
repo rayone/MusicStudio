@@ -87,10 +87,10 @@ public struct SettingsView: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("MusicStudio \(AppInfo.versionWithBuild)")
+                        Text("MusicStudio \(AppInfo.versionWithRevision)")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundColor(Theme.fgDark)
-                        Text("Apple Silicon MLX · \(AppInfo.revision)")
+                        Text("Apple Silicon MLX · build \(AppInfo.build)")
                             .font(.system(size: 9))
                             .foregroundColor(Theme.comment)
                     }

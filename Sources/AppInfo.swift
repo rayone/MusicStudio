@@ -29,9 +29,17 @@ public enum AppInfo {
         build == version ? version : "\(version) (\(build))"
     }
 
-    /// "0.1.0 (42 · a1b2c3d)" — version, build number, and source revision. Use where
-    /// full provenance helps (About box, bug reports, logs).
-    public static var versionWithBuildAndRevision: String {
-        "\(versionWithBuild) · \(revision)"
+    /// Headline identity for the UI: "0.1.0 · a1b2c3d". The git revision is the only
+    /// portable identity — every `git pull` of a commit reproduces it, unlike the local
+    /// build counter which resets per machine. Use this where the user needs to know
+    /// *which build* they are running (e.g. after pulling main to test).
+    public static var versionWithRevision: String {
+        revision == "unknown" ? version : "\(version) · \(revision)"
+    }
+
+    /// Full provenance: "0.1.0 · a1b2c3d (build 42)" — adds the local build number after
+    /// the portable revision. For bug reports and logs.
+    public static var versionWithRevisionAndBuild: String {
+        build == version ? versionWithRevision : "\(versionWithRevision) (build \(build))"
     }
 }
