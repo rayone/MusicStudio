@@ -96,6 +96,8 @@ Response:
 
 MusicStudio presents these songs in a searchable popover. Selecting a row fetches its details but does not start generation.
 
+## 2. Get selected song details
+
 ```http
 GET /v1/songs/{song_id}
 Authorization: Bearer <token>
