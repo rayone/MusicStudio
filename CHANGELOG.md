@@ -4,12 +4,16 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-11
+
 ### Fixed
-- Songwriter import window no longer closes when expanding a song's takes. It is now a sheet that stays open until closed with its dedicated close button (or Escape).
+- Songwriter import window no longer closes when interacting with it. It is now a sheet that stays open until closed with its dedicated close button (or Escape); importing or queueing no longer dismisses it.
+- Casting now recovers when the renderer has gone to sleep: playing a new track reactivates the stream pipeline (reconnects the receiver) instead of failing.
+- In-app version now shows the git revision (`0.1.0 · <sha>`) as the build identity, so a build pulled from GitHub is identifiable; the local build counter is secondary.
 
 ### Changed
-- Songs with multiple takes are expanded by default in the Songwriter window, and each take row shows its own metadata (BPM, key, meter, type, length, ABC) instead of the newest take's.
-- The take expand/collapse control is now a larger, clearly defined filled-chevron button.
+- The Songwriter window is a flat list with one row per take, titled "<title> (Take N)", each showing that take's own metadata. "Queue all N" queues every take of a song in one click; per-take "Queue" and "Load" act on a single take.
+- Build stamps a distinct, advancing `CFBundleVersion` and a `SCMRevision` (git short SHA, `-dirty` when built from uncommitted changes).
 
 ## [0.1.0] - 2026-10-06
 
@@ -37,4 +41,5 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 - First-run setup now installs the YuE2 engine (`mlx-yue`, pinned commit) from `Resources/engine-requirements.txt`. Previously it had to be installed by hand.
 - Local database backups are no longer copied into the app bundle.
 
+[0.1.1]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.1
 [0.1.0]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.0
