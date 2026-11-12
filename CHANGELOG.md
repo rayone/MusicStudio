@@ -4,6 +4,13 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-12
+
+### Added
+- Full support for Songwriter API Contract-Version 6: seamlessly imports rich `engine_prompts.yue2` (including key, BPM, and multi-word genre) and `engine_prompts.minimax` (complete 3-tier Structured Caption), along with structured `moods` and `instruments` arrays.
+- Decodes both v6 flat generation payloads (`song_id`, `brief`, top-level `lyrics`, `abc_score`) and legacy v3–v5 envelopes with automatic fallback.
+- Queries `status=all` on import so all crafted songs and takes are accessible regardless of status flag.
+
 ## [0.1.2] - 2026-11-11
 
 ### Changed
@@ -54,6 +61,7 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 - First-run setup now installs the YuE2 engine (`mlx-yue`, pinned commit) from `Resources/engine-requirements.txt`. Previously it had to be installed by hand.
 - Local database backups are no longer copied into the app bundle.
 
+[0.1.3]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.3
 [0.1.2]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.2
 [0.1.1]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.1
 [0.1.0]: https://github.com/rayone/MusicStudio/releases/tag/v0.1.0
