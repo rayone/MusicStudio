@@ -95,8 +95,8 @@ public final class SongwriterAPI {
     public func songs(allRevisions: Bool = false) async throws -> [SongwriterSongSummary] {
         guard Self.isEnabled else { throw SongwriterAPIError.disabled }
         let root = try Self.validatedBaseURL(Self.configuredBaseURL)
-        var query = [
-            URLQueryItem(name: "status", value: "ready"),
+        let query = [
+            URLQueryItem(name: "status", value: "all"),
             URLQueryItem(name: "limit", value: "100")
         ]
         // Takes are grouped server-side via take_group; the old all_revisions flag is a

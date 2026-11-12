@@ -1,7 +1,7 @@
 # MusicStudio–Songwriter API Contract
 
-Contract-Version: 5
-Updated-At: 2026-11-11T12:50:34Z
+Contract-Version: 6
+Updated-At: 2026-11-12T07:15:00Z
 Status: Confirmed & Implemented
 Updated-By: Songwriter & MusicStudio Collaboration
 
@@ -43,7 +43,7 @@ In local development, any non-empty token is accepted when `SONGWRITER_API_KEY` 
 ## 1. List available songs
 
 ```http
-GET /v1/songs?status=ready&limit=50&cursor=<optional>
+GET /v1/songs?status=all&limit=50&cursor=<optional>
 Authorization: Bearer <token>
 Accept: application/json
 ```
@@ -52,16 +52,19 @@ Returns one row per song (the current take of each). A **song** is a creative wo
 **take** is one generated version of it. Takes of the same song are distinct records that
 share a `take_group`:
 
+- `song_id` (or `id`) — unique identifier for this take record.
 - `take_group` — stable id shared by every take of one song (the first take's id).
 - `take_number` — 1..N, this take's position within its group.
 - `take_count` — number of takes in the group.
-- A standalone song is a group of one: `take_group == id`, `take_number == 1`, `take_count == 1`.
-- `take_id` (`"<id>:<revision>"`) stays a stable per-row identity for the client's list.
+- `brief` (or `summary`) — story/brief synopsis.
+- `moods` — list of dominant mood keywords (e.g. `["dark", "somber", "hypnotic"]`).
+- `instruments` — list of key instrumentation descriptors.
+- A standalone song is a group of one: `take_group == song_id`, `take_number == 1`, `take_count == 1`.
+- `take_id` (`"<song_id>:<revision>"`) stays a stable per-row identity for client list selection.
 
 MusicStudio groups rows by `take_group`, labels them `"<title> (Take <take_number> of
-<take_count>)"`, and offers "Queue all N takes" (one group) and "Queue all songs" (the list).
-The `all_revisions` query parameter is deprecated and ignored (takes are grouped via
-`take_group`, not DB revisions).
+<take_count>)"` (omitting the suffix when `take_count == 1`), and offers "Queue all N takes" (one group)
+and "Queue all N" (the entire list).
 
 Response:
 
@@ -69,25 +72,27 @@ Response:
 {
   "songs": [
     {
-      "id": "song_test_01",
+      "song_id": "song_test_01",
       "revision": 1,
       "take_id": "song_test_01:1",
       "take_group": "song_test_01",
       "take_number": 1,
       "take_count": 3,
       "title": "Neon Horizon",
-      "summary": "Story about cybernetic neon nights",
+      "brief": "Story about cybernetic neon nights",
       "genre": "Synth-pop",
       "subgenre": "Darkwave",
+      "moods": ["nocturnal", "melancholic"],
+      "instruments": ["analog synthesizer", "drum machine"],
       "language": "English",
       "instrumental": false,
       "duration_hint_sec": 180,
       "bpm": 120,
-      "key": "F# minor",
+      "key": "F#",
       "scale": "minor",
       "time_signature": "4/4",
       "has_abc": true,
-      "updated_at": "2026-09-23T05:00:00Z"
+      "updated_at": "2026-11-12T05:00:00Z"
     }
   ],
   "next_cursor": null
@@ -104,54 +109,47 @@ Authorization: Bearer <token>
 Accept: application/json
 ```
 
-Response:
+Response (v6 flat format, with legacy creative / model_inputs fallback):
 
 ```json
 {
-  "id": "song_test_01",
+  "song_id": "song_test_01",
   "revision": 1,
   "title": "Neon Horizon",
-  "summary": "Story about cybernetic neon nights",
-  "status": "ready",
-  "creative": {
-    "caption": "Dark analog synth-pop, driving gated drums, intimate female lead",
-    "lyrics": "[verse 1]\nNeon flickering in the rain\n\n[chorus]\nWe are burning through the pain",
-    "instrumental": false,
-    "language": "English",
-    "genre": "Synth-pop",
-    "subgenre": "Darkwave",
-    "moods": ["nocturnal", "melancholic"],
-    "instruments": ["analog synthesizer", "drum machine"],
-    "bpm": 120,
-    "key": "F# minor",
-    "scale": "minor",
-    "time_signature": "4/4",
-    "vocal_style": "intimate female lead",
-    "duration_hint_sec": 180
+  "brief": "Story about cybernetic neon nights",
+  "status": "finalized",
+  "lyrics": "[verse 1]\nNeon flickering in the rain\n\n[chorus]\nWe are burning through the pain",
+  "abc_score": "X:1\nT:Neon Horizon\nM:4/4\nL:1/16\nQ:1/4=120\n...",
+  "engine_prompts": {
+    "minimax": "Global Metadata\nBasic Attributes: bpm is 120. key is F#, and scale is minor. Synth-pop (Darkwave).\nGlobal Emotional Progression: ...\n\nVocal Details: ...\n\nArrangement: ...",
+    "yue2": "English, 120 BPM, Synth-pop, Darkwave, intimate female lead vocals, F# minor",
+    "songbench": "Synth-pop / Darkwave, Analog Synthesizer, Drum Machine, Nocturnal, Melancholic, Intimate Female Lead, 120 BPM"
   },
-  "model_inputs": {
-    "minimax": {
-      "caption": "[Global Metadata]\nbpm is 120. key is F#, and scale is minor. Synth-pop (Darkwave).",
-      "lyrics": "[verse]\nNeon flickering in the rain\n\n[chorus]\nWe are burning through the pain"
-    },
-    "yue2": {
-      "style": "English, 120 BPM, Synth-pop, Darkwave, intimate female lead vocals",
-      "lyrics": "[verse 1]\nNeon flickering in the rain\n\n[chorus]\nWe are burning through the pain",
-      "abc_score": "X:1\nT:Neon Horizon\nM:4/4\nL:1/16\nQ:1/4=120\nV: Vocal clef=treble\nV: Ins clef=treble\nK:F^m\n..."
-    }
-  },
-  "updated_at": "2026-09-23T05:00:00Z"
+  "genre": "Synth-pop",
+  "subgenre": "Darkwave",
+  "moods": ["nocturnal", "melancholic"],
+  "instruments": ["analog synthesizer", "drum machine"],
+  "vocal": "intimate female lead",
+  "instrumental": false,
+  "language": "English",
+  "bpm": 120,
+  "key": "F#",
+  "scale": "minor",
+  "time_signature": "4/4",
+  "duration_hint_sec": 180,
+  "created_at": "2026-11-12T05:00:00Z",
+  "updated_at": "2026-11-12T05:00:00Z"
 }
 ```
 
 MusicStudio selection behavior:
 
-- Store `id` and `revision` with the queued generation.
+- Store `song_id` and `revision` with the queued generation.
 - Keep MusicStudio's current model, output format, steps, guidance, seed, batch, and CoT settings.
-- For MiniMax, populate caption and lyrics from `model_inputs.minimax`, falling back to `creative`.
-- For YuE2, populate style and lyrics from `model_inputs.yue2`, falling back to `creative`.
-- For YuE2, populate the ABC editor from `model_inputs.yue2.abc_score` when present.
-- Set Instrumental from `creative.instrumental`.
+- For MiniMax, populate caption and lyrics from `engine_prompts.minimax` (falling back to `model_inputs.minimax.caption` or `creative.caption`).
+- For YuE2, populate style and lyrics from `engine_prompts.yue2` (falling back to `model_inputs.yue2.style` or `creative.caption`).
+- For YuE2, populate the ABC editor from `abc_score` (falling back to `model_inputs.yue2.abc_score`).
+- Set Instrumental from `instrumental` (falling back to `creative.instrumental`).
 - Apply `duration_hint_sec` only as an imported suggestion; the user may change it.
 - Allow the user to edit imported fields before queueing.
 

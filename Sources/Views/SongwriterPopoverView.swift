@@ -58,10 +58,10 @@ public struct SongwriterPopoverView: View {
             return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
     }
-
-    /// All takes that share a song's `take_group`, newest-first.
+    /// All takes that share a song's server-assigned `take_group`, sorted newest first.
     private func groupTakes(_ s: SongwriterSongSummary) -> [SongwriterSongSummary] {
-        vm.songwriterSongs
+        guard s.takeCount > 1 else { return [s] }
+        return vm.songwriterSongs
             .filter { $0.takeGroup == s.takeGroup }
             .sorted { $0.takeNumber > $1.takeNumber }
     }
@@ -75,7 +75,7 @@ public struct SongwriterPopoverView: View {
     /// Queue every take of the given row's song (its whole take_group).
     private func queueAllTakes(of s: SongwriterSongSummary) {
         let group = groupTakes(s)
-        let items = (group.isEmpty ? [s] : group).map { (id: $0.id, revision: $0.revision, title: $0.title) }
+        let items = group.map { (id: $0.id, revision: $0.revision, title: $0.title) }
         vm.queueSongs(items, label: "\(items.count) takes of \(s.title)")
     }
 

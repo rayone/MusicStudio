@@ -276,25 +276,85 @@ public struct SongwriterSongSummary: Codable, Identifiable, Hashable {
     public var created_at: String?
     public let updated_at: String
     public var take_id: String?
-    // Takes: a song is a creative work; a take is one generated version of it. take_group
-    // is shared by all takes of one song; take_number is 1..N; take_count is the group
-    // size. Standalone song = group of one (take_group == id, number 1, count 1).
     public var take_group: String?
     public var take_number: Int?
     public var take_count: Int?
+    public var moods: [String]?
+    public var instruments: [String]?
+    public var vocal: String?
 
-    /// Stable identity for one row. Prefers the server's `take_id`, falling back to
-    /// `id:revision` for responses without it.
     public var uniqueId: String {
         take_id ?? "\(id):\(revision)"
     }
 
-    /// The group this take belongs to; a standalone song is its own group.
     public var takeGroup: String { take_group ?? id }
-    /// Number of takes in this song's group (at least 1).
     public var takeCount: Int { max(1, take_count ?? 1) }
-    /// This take's position within its group (at least 1).
     public var takeNumber: Int { max(1, take_number ?? 1) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, song_id, revision, title, summary, brief, genre, subgenre
+        case language, instrumental, duration_hint_sec, bpm, key, scale
+        case time_signature, has_abc, created_at, updated_at
+        case take_id, take_group, take_number, take_count, moods, instruments, vocal
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(String.self, forKey: .song_id))
+            ?? (try? container.decode(String.self, forKey: .id))
+            ?? ""
+        self.revision = (try? container.decode(Int.self, forKey: .revision)) ?? 1
+        self.title = (try? container.decode(String.self, forKey: .title)) ?? "Untitled Song"
+        self.summary = (try? container.decode(String.self, forKey: .brief))
+            ?? (try? container.decode(String.self, forKey: .summary))
+            ?? ""
+        self.genre = (try? container.decode(String.self, forKey: .genre)) ?? ""
+        self.subgenre = (try? container.decode(String.self, forKey: .subgenre)) ?? ""
+        self.language = (try? container.decode(String.self, forKey: .language)) ?? "English"
+        self.instrumental = (try? container.decode(Bool.self, forKey: .instrumental)) ?? false
+        self.duration_hint_sec = try? container.decode(Double.self, forKey: .duration_hint_sec)
+        self.bpm = try? container.decode(Int.self, forKey: .bpm)
+        self.key = try? container.decode(String.self, forKey: .key)
+        self.scale = try? container.decode(String.self, forKey: .scale)
+        self.time_signature = (try? container.decode(String.self, forKey: .time_signature)) ?? "4/4"
+        self.has_abc = try? container.decode(Bool.self, forKey: .has_abc)
+        self.created_at = try? container.decode(String.self, forKey: .created_at)
+        self.updated_at = (try? container.decode(String.self, forKey: .updated_at)) ?? ""
+        self.take_id = try? container.decode(String.self, forKey: .take_id)
+        self.take_group = try? container.decode(String.self, forKey: .take_group)
+        self.take_number = try? container.decode(Int.self, forKey: .take_number)
+        self.take_count = try? container.decode(Int.self, forKey: .take_count)
+        self.moods = try? container.decode([String].self, forKey: .moods)
+        self.instruments = try? container.decode([String].self, forKey: .instruments)
+        self.vocal = try? container.decode(String.self, forKey: .vocal)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(genre, forKey: .genre)
+        try container.encode(subgenre, forKey: .subgenre)
+        try container.encode(language, forKey: .language)
+        try container.encode(instrumental, forKey: .instrumental)
+        try container.encodeIfPresent(duration_hint_sec, forKey: .duration_hint_sec)
+        try container.encodeIfPresent(bpm, forKey: .bpm)
+        try container.encodeIfPresent(key, forKey: .key)
+        try container.encodeIfPresent(scale, forKey: .scale)
+        try container.encode(time_signature, forKey: .time_signature)
+        try container.encodeIfPresent(has_abc, forKey: .has_abc)
+        try container.encodeIfPresent(created_at, forKey: .created_at)
+        try container.encode(updated_at, forKey: .updated_at)
+        try container.encodeIfPresent(take_id, forKey: .take_id)
+        try container.encodeIfPresent(take_group, forKey: .take_group)
+        try container.encodeIfPresent(take_number, forKey: .take_number)
+        try container.encodeIfPresent(take_count, forKey: .take_count)
+        try container.encodeIfPresent(moods, forKey: .moods)
+        try container.encodeIfPresent(instruments, forKey: .instruments)
+        try container.encodeIfPresent(vocal, forKey: .vocal)
+    }
 }
 public struct SongwriterSongList: Codable {
     public let songs: [SongwriterSongSummary]
@@ -336,10 +396,108 @@ public struct SongwriterSongDetail: Codable, Hashable {
     public let title: String
     public let summary: String
     public let status: String
-    public let creative: SongwriterCreative
+    public let creative: SongwriterCreative?
     public let model_inputs: SongwriterModelInputs?
     public let created_at: String?
     public let updated_at: String
+    // v6 flat fields
+    public let lyrics: String?
+    public let abc_score: String?
+    public let engine_prompts: [String: String]?
+    public let instrumental: Bool?
+    public let duration_hint_sec: Double?
+    public let bpm: Int?
+    public let key: String?
+    public let scale: String?
+    public let genre: String?
+    public let subgenre: String?
+    public let moods: [String]?
+    public let instruments: [String]?
+    public let vocal: String?
+
+    public var resolvedId: String { id }
+    public var resolvedTitle: String { title }
+    public var resolvedYue2Style: String {
+        engine_prompts?["yue2"] ?? model_inputs?.yue2?.style ?? creative?.caption ?? ""
+    }
+    public var resolvedMinimaxCaption: String {
+        engine_prompts?["minimax"] ?? model_inputs?.minimax?.caption ?? creative?.caption ?? ""
+    }
+    public var resolvedLyrics: String {
+        lyrics ?? model_inputs?.yue2?.lyrics ?? model_inputs?.minimax?.lyrics ?? creative?.lyrics ?? ""
+    }
+    public var resolvedAbcScore: String {
+        abc_score ?? model_inputs?.yue2?.abc_score ?? ""
+    }
+    public var resolvedInstrumental: Bool {
+        instrumental ?? creative?.instrumental ?? false
+    }
+    public var resolvedDurationSec: Double? {
+        duration_hint_sec ?? creative?.duration_hint_sec
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, song_id, revision, title, summary, brief, status
+        case creative, model_inputs, created_at, updated_at
+        case lyrics, abc_score, engine_prompts, instrumental, duration_hint_sec
+        case bpm, key, scale, genre, subgenre, moods, instruments, vocal
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? container.decode(String.self, forKey: .song_id))
+            ?? (try? container.decode(String.self, forKey: .id))
+            ?? ""
+        self.revision = (try? container.decode(Int.self, forKey: .revision)) ?? 1
+        self.title = (try? container.decode(String.self, forKey: .title)) ?? "Untitled Song"
+        self.summary = (try? container.decode(String.self, forKey: .brief))
+            ?? (try? container.decode(String.self, forKey: .summary))
+            ?? ""
+        self.status = (try? container.decode(String.self, forKey: .status)) ?? "ready"
+        self.creative = try? container.decode(SongwriterCreative.self, forKey: .creative)
+        self.model_inputs = try? container.decode(SongwriterModelInputs.self, forKey: .model_inputs)
+        self.created_at = try? container.decode(String.self, forKey: .created_at)
+        self.updated_at = (try? container.decode(String.self, forKey: .updated_at)) ?? ""
+        self.lyrics = try? container.decode(String.self, forKey: .lyrics)
+        self.abc_score = try? container.decode(String.self, forKey: .abc_score)
+        self.engine_prompts = try? container.decode([String: String].self, forKey: .engine_prompts)
+        self.instrumental = try? container.decode(Bool.self, forKey: .instrumental)
+        self.duration_hint_sec = try? container.decode(Double.self, forKey: .duration_hint_sec)
+        self.bpm = try? container.decode(Int.self, forKey: .bpm)
+        self.key = try? container.decode(String.self, forKey: .key)
+        self.scale = try? container.decode(String.self, forKey: .scale)
+        self.genre = try? container.decode(String.self, forKey: .genre)
+        self.subgenre = try? container.decode(String.self, forKey: .subgenre)
+        self.moods = try? container.decode([String].self, forKey: .moods)
+        self.instruments = try? container.decode([String].self, forKey: .instruments)
+        self.vocal = try? container.decode(String.self, forKey: .vocal)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(title, forKey: .title)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(creative, forKey: .creative)
+        try container.encodeIfPresent(model_inputs, forKey: .model_inputs)
+        try container.encodeIfPresent(created_at, forKey: .created_at)
+        try container.encode(updated_at, forKey: .updated_at)
+        try container.encodeIfPresent(lyrics, forKey: .lyrics)
+        try container.encodeIfPresent(abc_score, forKey: .abc_score)
+        try container.encodeIfPresent(engine_prompts, forKey: .engine_prompts)
+        try container.encodeIfPresent(instrumental, forKey: .instrumental)
+        try container.encodeIfPresent(duration_hint_sec, forKey: .duration_hint_sec)
+        try container.encodeIfPresent(bpm, forKey: .bpm)
+        try container.encodeIfPresent(key, forKey: .key)
+        try container.encodeIfPresent(scale, forKey: .scale)
+        try container.encodeIfPresent(genre, forKey: .genre)
+        try container.encodeIfPresent(subgenre, forKey: .subgenre)
+        try container.encodeIfPresent(moods, forKey: .moods)
+        try container.encodeIfPresent(instruments, forKey: .instruments)
+        try container.encodeIfPresent(vocal, forKey: .vocal)
+    }
 }
 
 public struct SongBenchEvaluation: Codable, Hashable, Sendable {

@@ -622,23 +622,22 @@ Sound of the future rolling through the land
         Task {
             do {
                 let song = try await SongwriterAPI.shared.song(id: summary.id, revision: targetRevision)
-                let input = selectedModelFamily == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
-                caption = input?.style ?? input?.caption ?? song.creative.caption
-                lyrics = input?.lyrics ?? song.creative.lyrics
-                isInstrumental = song.creative.instrumental
-                if let suggestedDuration = song.creative.duration_hint_sec, suggestedDuration > 0 {
+                caption = selectedModelFamily == .yue2 ? song.resolvedYue2Style : song.resolvedMinimaxCaption
+                lyrics = song.resolvedLyrics
+                isInstrumental = song.resolvedInstrumental
+                if let suggestedDuration = song.resolvedDurationSec, suggestedDuration > 0 {
                     duration = suggestedDuration
                 }
                 if selectedModelFamily == .yue2 {
                     isLoadingEngineScore = true
-                    abcScoreText = input?.abc_score ?? ""
+                    abcScoreText = song.resolvedAbcScore
                     isLoadingEngineScore = false
                 }
-                selectedSongwriterId = song.id
+                selectedSongwriterId = song.resolvedId
                 selectedSongwriterRevision = song.revision
-                selectedSongwriterTitle = song.title
-                statusText = "Imported from Songwriter: \(song.title) (Take \(song.revision))"
-                appendLog(component: .ui, level: .info, message: "Imported Songwriter song", detail: "id=\(song.id) revision=\(song.revision)")
+                selectedSongwriterTitle = song.resolvedTitle
+                statusText = "Imported from Songwriter: \(song.resolvedTitle) (Take \(song.revision))"
+                appendLog(component: .ui, level: .info, message: "Imported Songwriter song", detail: "id=\(song.resolvedId) revision=\(song.revision)")
             } catch {
                 songwriterError = error.localizedDescription
             }
@@ -682,9 +681,8 @@ Sound of the future rolling through the land
             for take in takes {
                 do {
                     let song = try await SongwriterAPI.shared.song(id: songId, revision: take)
-                    let input = family == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
-                    let takeCaption = input?.style ?? input?.caption ?? song.creative.caption
-                    let takeLyrics = input?.lyrics ?? song.creative.lyrics
+                    let takeCaption = family == .yue2 ? song.resolvedYue2Style : song.resolvedMinimaxCaption
+                    let takeLyrics = song.resolvedLyrics
 
                     var paramsObj: [String: Any] = [
                         "duration": runDuration,
@@ -692,19 +690,18 @@ Sound of the future rolling through the land
                         "guidance": runGuidance,
                         "format": runFormat,
                         "cot": runCot,
-                        "songwriter_id": song.id,
+                        "songwriter_id": song.resolvedId,
                         "songwriter_revision": song.revision,
-                        "songwriter_title": song.title
+                        "songwriter_title": song.resolvedTitle
                     ]
 
                     // YuE2 symbolic CoT only: snapshot the take's own ABC score durably.
                     if family == .yue2, usesAbc,
-                       let abc = input?.abc_score,
-                       !abc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                       !song.resolvedAbcScore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let abcDir = homeDirectory.appendingPathComponent("queue-abc", isDirectory: true)
                         let queuedAbc = abcDir.appendingPathComponent("score_\(UUID().uuidString).abc")
                         try FileManager.default.createDirectory(at: abcDir, withIntermediateDirectories: true)
-                        try abc.write(to: queuedAbc, atomically: true, encoding: .utf8)
+                        try song.resolvedAbcScore.write(to: queuedAbc, atomically: true, encoding: .utf8)
                         paramsObj["abc_file"] = queuedAbc.path
                     }
 
@@ -765,9 +762,8 @@ Sound of the future rolling through the land
             for item in items {
                 do {
                     let song = try await SongwriterAPI.shared.song(id: item.id, revision: item.revision)
-                    let input = family == .yue2 ? song.model_inputs?.yue2 : song.model_inputs?.minimax
-                    let takeCaption = input?.style ?? input?.caption ?? song.creative.caption
-                    let takeLyrics = input?.lyrics ?? song.creative.lyrics
+                    let takeCaption = family == .yue2 ? song.resolvedYue2Style : song.resolvedMinimaxCaption
+                    let takeLyrics = song.resolvedLyrics
 
                     var paramsObj: [String: Any] = [
                         "duration": runDuration,
@@ -775,18 +771,17 @@ Sound of the future rolling through the land
                         "guidance": runGuidance,
                         "format": runFormat,
                         "cot": runCot,
-                        "songwriter_id": song.id,
+                        "songwriter_id": song.resolvedId,
                         "songwriter_revision": song.revision,
-                        "songwriter_title": song.title
+                        "songwriter_title": song.resolvedTitle
                     ]
 
                     if family == .yue2, usesAbc,
-                       let abc = input?.abc_score,
-                       !abc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                       !song.resolvedAbcScore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let abcDir = homeDirectory.appendingPathComponent("queue-abc", isDirectory: true)
                         let queuedAbc = abcDir.appendingPathComponent("score_\(UUID().uuidString).abc")
                         try FileManager.default.createDirectory(at: abcDir, withIntermediateDirectories: true)
-                        try abc.write(to: queuedAbc, atomically: true, encoding: .utf8)
+                        try song.resolvedAbcScore.write(to: queuedAbc, atomically: true, encoding: .utf8)
                         paramsObj["abc_file"] = queuedAbc.path
                     }
 
