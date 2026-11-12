@@ -15,8 +15,8 @@ All notable changes to MusicStudio are documented here. The format follows [Keep
 
 ### Changed
 - Songwriter and MusicStudio now share one vocabulary: a **song** is a creative work, a **take** is one generated version of it. Takes of a song are grouped by a server-assigned `take_group`; the window labels rows "Title (Take N of M)" and no longer mislabels every take as "Take 1".
-- Fully compatible with Songwriter Contract-Version 6: consumes `song_id`, `brief`, populated `moods` and `instruments` arrays, and imports complete model prompts (`engine_prompts.yue2` and `engine_prompts.minimax`) with legacy v3/v4/v5 fallback.
 - Songwriter persists `take_group`/`take_number` when a take is saved (and "+ New Take" stays within the song's group); the `/v1/songs` API exposes `take_group`, `take_number`, and `take_count`.
+
 ### Added
 - "Queue all N takes" queues every take of one song in one click; a header "Queue all N" queues every listed song.
 
